@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
+from time import perf_counter
+from typing import Any
+
+from domain.decision import DecisionEngine
+
+
+@dataclass(slots=True)
+class PipelineItem:
+    item: dict[str, Any]
+    source: dict[str, Any]
+    found_perf: float
+
+
+@dataclass(slots=True)
+class PipelineStats:
+    discovered: int = 0
+    duplicates: int = 0
+    filtered: int = 0
+    accepted: int = 0
+    queued: int = 0
+
+
+FetchSources = Callable[
+    ..., AsyncIterator[tuple[dict[str, Any], list[dict[str, Any]], str | None]]
+]
+
+
+class DiscoveryPipeline:
+    """Hot-path orchestration: fetch -> cheap decision -> queue -> seen."""
+
+    def __init__(
+        self,
+        *,
+        fetch_sources: FetchSources,
+        make_key: Callable[[dict[str, Any]], str],
+        is_seen: Callable[[str], bool],
+        is_attempted: Callable[[str], bool],
+        mark_seen: Callable[[str], Awaitable[None]],
+        enqueue_autobuy: Callable[[dict[str, Any], dict[str, Any], float], Awaitable[None]],
+        decision: DecisionEngine | None = None,
+        max_items_per_source: int = 200,
+        max_new_items_per_cycle: int = 1000,
+    ):
+        self._fetch_sources = fetch_sources
+        self._make_key = make_key
+        self._is_seen = is_seen
+        self._is_attempted = is_attempted
+        self._mark_seen = mark_seen
+        self._enqueue_autobuy = enqueue_autobuy
+        self._decision = decision or DecisionEngine()
+        self._max_items_per_source = max(0, int(max_items_per_source))
+        self._max_new_items_per_cycle = max(0, int(max_new_items_per_cycle))
+
+    async def run(self, user_id: int, *, include_non_autobuy: bool):
+        stats = PipelineStats()
+        accepted: list[PipelineItem] = []
+        errors: list[tuple[str, str, str]] = []
+        seen_this_cycle: set[str] = set()
+
+        async for source, items, err in self._fetch_sources(
+            user_id, include_non_autobuy=include_non_autobuy
+        ):
+            if err:
+                errors.append(
+                    (
+                        str(source.get("name") or "UNKNOWN"),
+                        str(source.get("url") or "UNKNOWN"),
+                        str(err),
+                    )
+                )
+                continue
+            if not items:
+                continue
+
+            ordered = sorted(items, key=_item_sort_key, reverse=True)
+            if self._max_items_per_source > 0:
+                ordered = ordered[: self._max_items_per_source]
+
+            for item in ordered:
+                if (
+                    self._max_new_items_per_cycle > 0
+                    and stats.accepted >= self._max_new_items_per_cycle
+                ):
+                    break
+
+                stats.discovered += 1
+                key = self._make_key(item)
+                if key in seen_this_cycle or self._is_seen(key):
+                    stats.duplicates += 1
+                    continue
+
+                decision = self._decision.decide(
+                    item,
+                    already_attempted=self._is_attempted(key),
+                )
+                if not decision.accepted:
+                    if decision.reason == "filtered":
+                        stats.filtered += 1
+                    else:
+                        stats.duplicates += 1
+                    continue
+
+                found_perf = perf_counter()
+                seen_this_cycle.add(key)
+
+                # Queue handoff comes before persistence: if queue setup fails,
+                # the item remains discoverable on the next scan instead of being hidden.
+                if source.get("autobuy", False) and not self._is_attempted(key):
+                    await self._enqueue_autobuy(source, item, found_perf)
+                    stats.queued += 1
+
+                await self._mark_seen(key)
+                stats.accepted += 1
+                accepted.append(PipelineItem(item=item, source=source, found_perf=found_perf))
+
+        return accepted, stats, errors
+
+
+def _item_sort_key(item: dict[str, Any]) -> tuple[int, int]:
+    published = item.get("published_at") or item.get("created_at") or item.get("date") or item.get("time")
+    try:
+        timestamp = int(float(published))
+    except (TypeError, ValueError):
+        timestamp = 0
+    try:
+        item_id = int(item.get("item_id") or item.get("id") or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    return timestamp, item_id
