@@ -9,7 +9,6 @@ def setup_logging(log_file: str, max_bytes: int, backup_count: int) -> logging.L
         fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
     root = logging.getLogger()
     if not root.handlers:
         root.setLevel(logging.INFO)
@@ -19,10 +18,10 @@ def setup_logging(log_file: str, max_bytes: int, backup_count: int) -> logging.L
 
     autobuy_logger = logging.getLogger("autobuy")
     autobuy_logger.setLevel(logging.INFO)
-
     has_file_handler = any(
-        isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", "").endswith(log_file)
-        for h in autobuy_logger.handlers
+        isinstance(handler, RotatingFileHandler)
+        and getattr(handler, "baseFilename", "").endswith(log_file)
+        for handler in autobuy_logger.handlers
     )
     if not has_file_handler:
         file_handler = RotatingFileHandler(
@@ -33,6 +32,5 @@ def setup_logging(log_file: str, max_bytes: int, backup_count: int) -> logging.L
         )
         file_handler.setFormatter(formatter)
         autobuy_logger.addHandler(file_handler)
-
     autobuy_logger.propagate = True
     return autobuy_logger
