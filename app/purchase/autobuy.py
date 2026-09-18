@@ -20,9 +20,9 @@ from app.runtime.core import (
     bot, _format_value, _safe_compact, autobuy_endpoint_cache, autobuy_queue_manager,
     buy_semaphore, enqueue_hunter_notification, ensure_notify_worker, get_buy_lock,
     load_user_data, log_autobuy, make_card, make_item_key, reset_no_lots_message,
-    send_bot_message, user_api_errors, user_buy_attempted, user_buy_inflight,
+    send_bot_message, user_api_errors, user_buy_attempted, user_buy_inflight, purchase_idempotency,
     user_hunter_interval, user_hunter_mode, user_hunter_tasks, user_notify_queues,
-    user_notify_workers, user_search_active, user_seen_items,
+    user_notify_workers, user_search_active, user_seen_items, iter_sources_results_split,
 )
 from app.services.market_api import _api_limit_bucket, _default_api_headers, get_session, request_rate_limiter
 from app.storage.sqlite import db_mark_buy_attempted, db_mark_seen_batch
