@@ -177,6 +177,11 @@ def _format_money(v) -> str:
             return str(v)
 
 
+def invalidate_balance_cache() -> None:
+    _balance_cache["text"] = "—"
+    _balance_cache["ts"] = 0.0
+
+
 def _extract_account_buy_balance_text(data) -> str | None:
     candidates = []
 
