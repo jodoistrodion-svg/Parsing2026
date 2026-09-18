@@ -1,39 +1,45 @@
 
+from __future__ import annotations
+
 import asyncio
-import json
-import aiohttp
-import aiosqlite
 import html
+import logging
+import os
 import re
 import time
-import random
-import os
-import logging
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from collections import defaultdict
 
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.exceptions import (
     TelegramBadRequest,
     TelegramConflictError,
     TelegramForbiddenError,
     TelegramRetryAfter,
-    TelegramUnauthorizedError,
 )
 
 from bot.autobuy_strategy import build_buy_urls, prioritize_buy_urls
 from bot.ui import render_status_card
 from buyer.queue import UserAutobuyQueueManager
-from domain.decision import DecisionEngine
-from market.pipeline import DiscoveryPipeline
 from purchase.idempotency import PurchaseIdempotency
 from services.logging_setup import setup_logging
 
-from config import API_TOKEN as _API_TOKEN, LZT_API_KEY as _LZT_API_KEY
-
-from app.config.settings import *
+from app.config.settings import (
+    API_TOKEN,
+    AUTOBUY_LOG_FILE,
+    HUNTER_INTERVAL_BASE,
+    LOG_MAX_BYTES,
+    LOG_ROTATE_KEEP,
+    LIMITED_EXTRA_DELAY,
+    MAX_NEW_ITEMS_PER_CYCLE,
+    MAX_URLS_PER_USER_DEFAULT,
+    MAX_URLS_PER_USER_LIMITED,
+    MAX_URL_NAME_LEN,
+    SHORT_CARD_MAX,
+    TG_SEND_DELAY,
+    URL_PAGE_SIZE,
+    USER_PAGE_SIZE,
+)
 from market.normalize import normalize_url, validate_market_url
 from market.discovery import _run_bounded
 
