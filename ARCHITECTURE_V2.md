@@ -26,3 +26,15 @@ The autobuy hot path remains: discover -> cheap dedup/decision -> non-blocking q
 ## Verification contract
 
 CI runs Python 3.12, installs the pinned aiogram dependency, compiles every Python file and executes the regression suite. The suite also checks import boundaries, queue shutdown, discovery cancellation, runtime cleanup and dependency alignment.
+
+## Production-audit hardening
+
+- Runtime configuration is loaded and type-validated in `app/config/settings.py`; `config.py` is only a compatibility facade.
+- Telegram handlers use explicit runtime imports; URL/user pagination constants are not implicit globals.
+- Market URL normalization uses parsed query parameters and a canonical host allowlist instead of substring rewriting.
+- Balance caching is owned by the market API service and exposes an explicit invalidation operation.
+- Autobuy queue admission is explicit: a full queue rejects a new job instead of silently dropping older jobs.
+- A rejected autobuy queue handoff does not mark the item as seen.
+- Purchase idempotency claims can only be released by their owning task.
+- Missing LZT API credentials fail the autobuy attempt immediately rather than entering a pointless retry window.
+- Development test dependencies live in `requirements-dev.txt`; CI installs both runtime and development requirements.
