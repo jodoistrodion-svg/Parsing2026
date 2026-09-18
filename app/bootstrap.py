@@ -5,6 +5,7 @@ from aiogram.exceptions import TelegramConflictError, TelegramUnauthorizedError
 
 import app.application as application
 import app.runtime.core as runtime
+from app.config.settings import validate_runtime_config
 from app.services.market_api import close_session
 from app.storage.sqlite import db_close, init_db
 
@@ -22,6 +23,7 @@ async def main():
     global bot
     logger.info("BOT_START mode=classic balance_id=%s", LZT_BALANCE_ID)
 
+    validate_runtime_config()
     if not has_valid_telegram_token(API_TOKEN):
         raise RuntimeError("Некорректный API_TOKEN: бот не может быть запущен")
 
