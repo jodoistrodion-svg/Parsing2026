@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from app.config.settings import (
     AUTOBUY_BURST_FIRST_WAVE, AUTOBUY_MAX_DURATION_SEC, AUTOBUY_MAX_HTTP_ATTEMPTS,
+    AUTOBUY_MODE,
     AUTOBUY_PARALLEL_HTTP, AUTOBUY_QUEUE_RETRY_MAX_DELAY, AUTOBUY_QUEUE_RETRY_MIN_DELAY,
     AUTOBUY_RETRY_ATTEMPTS, AUTOBUY_RETRY_MAX_DELAY, AUTOBUY_RETRY_MIN_DELAY,
     AUTOBUY_TOTAL_RETRY_WINDOW_SEC, AUTOBUY_URL_LIMIT, FAST_AUTOBUY_TIMEOUT,
@@ -29,6 +30,7 @@ from app.storage.sqlite import db_mark_buy_attempted, db_mark_seen_batch
 from bot.autobuy_strategy import build_buy_urls, prioritize_buy_urls
 from domain.decision import DecisionEngine
 from market.pipeline import DiscoveryPipeline
+from metrics.events import METRICS
 
 def _autobuy_buy_urls(source_url: str, item_id: int):
     return build_buy_urls(source_url, item_id)
@@ -263,6 +265,10 @@ def _normalize_command_text(text: str) -> str:
 async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None = None, max_duration_override: float | None = None):
     if not LZT_API_KEY:
         return False, "LZT_API_KEY не задан"
+
+    if AUTOBUY_MODE == "dry-run":
+        METRICS.inc("autobuy_dry_run_total")
+        return True, "DRY_RUN: покупка не отправлялась в LZT API"
 
     item_id = item.get("item_id") or item.get("id")
     if not item_id:
@@ -508,8 +514,8 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
     lot_price = _extract_item_price(item)
     lot_time = _format_item_time_human(_extract_item_time(item))
     now_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    result_emoji = "✅" if bought else "❌"
-    result_word = "Успех" if bought else "Ошибка"
+    result_emoji = "🧪" if (bought and AUTOBUY_MODE == "dry-run") else "✅" if bought else "❌"
+    result_word = "Симуляция" if (bought and AUTOBUY_MODE == "dry-run") else "Успех" if bought else "Ошибка"
     buy_result_text = (
         f"🛒 <b>Автобай {result_emoji}</b> [{html.escape(src_name)}]\n"
         f"📌 Статус: <b>{result_word}</b>\n"
@@ -593,7 +599,7 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
                 make_key=make_item_key,
                 is_seen=lambda key: key in user_seen_items[user_id],
                 is_attempted=lambda key: key in user_buy_attempted[user_id] or key in user_buy_inflight[user_id],
-                mark_seen=lambda key: _mark_seen_and_batch(key, user_id, seen_batch),
+                mark_seen=lambda key, batch=seen_batch: _mark_seen_and_batch(key, user_id, batch),
                 enqueue_autobuy=enqueue_autobuy,
                 decision=DecisionEngine(),
                 max_items_per_source=MAX_ITEMS_PER_SOURCE_SCAN,

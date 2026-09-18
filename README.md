@@ -2,33 +2,93 @@
 
 Асинхронный Telegram-бот для мониторинга источников LZT Market и обработки автобая.
 
-## Запуск
+## Production architecture
 
-1. Python 3.12.
-2. `python -m pip install -r requirements.txt`
-3. Для разработки и тестов: `python -m pip install -r requirements-dev.txt`
-4. Скопируй `env.example` в `.env`.
-5. Заполни `API_TOKEN` и `OWNER_ID`. `LZT_API_KEY` нужен только для функций, которые обращаются к защищённому API LZT.
-6. По умолчанию `ACCESS_MODE=closed`.
-7. `python main.py`
+Проект построен вокруг одного асинхронного процесса:
 
-## Структура
+    Telegram
+       │
+       ▼
+    aiogram handlers
+       │
+       ▼
+    runtime / state
+       │
+       ├── market discovery -> decision/filter
+       │                          │
+       │                          ▼
+       │                    bounded queue
+       │                          │
+       │                          ▼
+       │                     autobuy engine
+       │                          │
+       │                          ▼
+       │                       LZT API
+       │
+       ├── SQLite repositories
+       ├── health/readiness
+       └── metrics/logging
 
-`main.py` — process entry point. `app/application.py` — composition root. `app/runtime/core.py` — application runtime/state and orchestration helpers. `app/handlers.py` — Telegram handlers. `app/purchase/autobuy.py` — autobuy lifecycle/hot path. Infrastructure is isolated in `app/services/`, `app/storage/`, `market/`, `buyer/`, `purchase/`, `domain/`, `filters/`.
+The latency-sensitive path stays inside one process and uses bounded async concurrency. Operational infrastructure is optional and can be enabled through environment variables.
 
-## Проверки
+## Windows setup
 
-`python -m compileall -q .`
+The recommended local layout is a persistent Git checkout, not repeated ZIP extraction.
 
-`python -m pytest -q`
+    D:\Parsing\lzt_market_bot
 
-GitHub Actions выполняет compile + pytest на Python 3.12.
-Для локальной проверки используй:
-`python -m compileall -q .`
-`python -m pytest -q`
+One-time installation:
 
-## Безопасность
+    cd "D:\Parsing\lzt_market_bot"
+    python -m venv .venv
+    .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 
-Секреты не хранятся в Git. Используй только placeholders в `env.example`.
+Create .env once. Future code updates do not overwrite it.
 
-В старом `env.example` были опубликованы реальные Telegram/LZT credentials. Удаление значения из текущей ветки не отзывает и не удаляет его из истории Git. Эти credentials необходимо отозвать и перевыпустить у провайдеров.
+Update code:
+
+    git pull --ff-only origin main
+
+Run:
+
+    .\.venv\Scripts\python.exe main.py
+
+## Configuration
+
+Preferred variables:
+
+- API_TOKEN
+- OWNER_ID / OWNER_IDS
+- LZT_API_KEY
+- ACCESS_MODE=closed
+- AUTOBUY_MODE=live
+
+For migration, the loader also accepts TELEGRAM_BOT_TOKEN, BOT_TOKEN, LZT_API_TOKEN and ADMIN_TELEGRAM_ID. An old DRY_RUN=true setting is interpreted as AUTOBUY_MODE=dry-run.
+
+The loader validates configuration before Telegram polling starts.
+
+## Health and metrics
+
+Set HEALTH_PORT=8080 to expose:
+
+- GET /healthz — process liveness.
+- GET /readyz — startup readiness.
+- GET /metrics — Prometheus-compatible counters/gauges.
+
+For Docker, docker compose up --build publishes port 8080 and stores SQLite in ./data.
+
+## Verification
+
+    python -m compileall -q .
+    python -m pytest -q
+    python -m pyflakes .
+    python -m ruff check .
+    python -m pip_audit -r requirements.txt
+
+GitHub Actions runs the test/lint matrix on Python 3.12, 3.13 and 3.14 for Linux and Windows, plus dependency audit and Docker build.
+
+## Security
+
+Never commit .env, tokens, secret answers, databases or logs.
+
+The current repository intentionally contains only placeholders in env.example. Any credentials exposed in older history must be revoked and replaced at the provider.

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import os
 import re
 import time
 from collections import defaultdict
@@ -22,11 +21,16 @@ from purchase.idempotency import PurchaseIdempotency
 from services.logging_setup import setup_logging
 
 from app.config.settings import (
+    API_TOKEN,
     AUTOBUY_LOG_FILE,
+    BUY_SEMAPHORE,
     HUNTER_INTERVAL_BASE,
+    LOG_FORMAT,
+    LOG_LEVEL,
     LOG_MAX_BYTES,
     LOG_ROTATE_KEEP,
     LIMITED_EXTRA_DELAY,
+    LZT_API_KEY,
     MAX_URLS_PER_USER_DEFAULT,
     MAX_URLS_PER_USER_LIMITED,
     MAX_URL_NAME_LEN,
@@ -38,7 +42,14 @@ from app.config.settings import (
 )
 from market.discovery import _run_bounded
 
-logger = setup_logging(AUTOBUY_LOG_FILE, LOG_MAX_BYTES, LOG_ROTATE_KEEP)
+logger = setup_logging(
+    AUTOBUY_LOG_FILE,
+    LOG_MAX_BYTES,
+    LOG_ROTATE_KEEP,
+    level=LOG_LEVEL,
+    log_format=LOG_FORMAT,
+    secrets=(API_TOKEN, LZT_API_KEY),
+)
 
 
 def _safe_compact(s: str, n: int = 400) -> str:
@@ -397,7 +408,7 @@ user_page_state = defaultdict(lambda: {"ctx": None, "page": 0})
 
 autobuy_endpoint_cache: dict[str, list[str]] = {}
 buy_locks: dict[str, asyncio.Lock] = {}
-buy_semaphore = asyncio.Semaphore(int((os.getenv("BUY_SEMAPHORE") or "128").strip()))
+buy_semaphore = asyncio.Semaphore(BUY_SEMAPHORE)
 
 
 def get_buy_lock(item_key: str) -> asyncio.Lock:

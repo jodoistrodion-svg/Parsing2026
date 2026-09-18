@@ -5,7 +5,13 @@ import json
 import time
 import aiosqlite
 
-from app.config.settings import ACCESS_OPEN, DB_FILE, OWNER_IDS, SEED_URLS_JSON
+from app.config.settings import (
+    ACCESS_OPEN,
+    DB_BUSY_TIMEOUT_MS,
+    DB_FILE,
+    OWNER_IDS,
+    SEED_URLS_JSON,
+)
 from market.normalize import normalize_url, validate_market_url
 
 _db: aiosqlite.Connection | None = None
@@ -19,7 +25,7 @@ async def db_conn() -> aiosqlite.Connection:
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA synchronous=NORMAL")
         await _db.execute("PRAGMA foreign_keys=ON")
-        await _db.execute("PRAGMA busy_timeout=5000")
+        await _db.execute(f"PRAGMA busy_timeout={int(DB_BUSY_TIMEOUT_MS)}")
     return _db
 
 
@@ -133,6 +139,15 @@ async def init_db():
         "CREATE INDEX IF NOT EXISTS idx_urls_user_added ON urls(user_id, added_at, url)",
         commit=True,
     )
+    await db_execute(
+        "CREATE INDEX IF NOT EXISTS idx_seen_user_time ON seen(user_id, seen_at)",
+        commit=True,
+    )
+    await db_execute(
+        "CREATE INDEX IF NOT EXISTS idx_buy_attempted_user_time ON buy_attempted(user_id, attempted_at)",
+        commit=True,
+    )
+    await db_execute("PRAGMA user_version = 3")
 
 
 async def db_ensure_user(user_id: int):
@@ -317,3 +332,47 @@ async def db_clear_buy_attempted(user_id: int):
     await db_execute("DELETE FROM buy_attempted WHERE user_id=?", (user_id,), commit=True)
 
 __all__ = [name for name in globals() if not name.startswith("__")]
+
+
+
+async def db_get_schema_version() -> int:
+    row = await db_fetchone("PRAGMA user_version")
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+async def db_cleanup(
+    *,
+    seen_retention_days: int = 90,
+    buy_attempt_retention_days: int = 180,
+) -> dict[str, int]:
+    now = int(time.time())
+    seen_cutoff = now - max(1, int(seen_retention_days)) * 86400
+    attempted_cutoff = now - max(1, int(buy_attempt_retention_days)) * 86400
+
+    db = await db_conn()
+    async with _db_lock:
+        seen_deleted = 0
+        attempted_deleted = 0
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            seen_cursor = await db.execute(
+                "DELETE FROM seen WHERE seen_at < ?",
+                (seen_cutoff,),
+            )
+            attempted_cursor = await db.execute(
+                "DELETE FROM buy_attempted WHERE attempted_at < ?",
+                (attempted_cutoff,),
+            )
+            seen_deleted = int(seen_cursor.rowcount)
+            attempted_deleted = int(attempted_cursor.rowcount)
+            await seen_cursor.close()
+            await attempted_cursor.close()
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    return {
+        "seen_deleted": max(0, seen_deleted),
+        "buy_attempted_deleted": max(0, attempted_deleted),
+    }
