@@ -1,24 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramConflictError, TelegramUnauthorizedError
 
-from app.application import (
-    API_TOKEN,
-    LZT_BALANCE_ID,
-    autobuy_queue_manager,
-    close_session,
-    db_close,
-    dp,
-    error_reporter_loop,
-    has_valid_telegram_token,
-    init_db,
-    logger,
-)
+import app.application as application
+from app.services.market_api import close_session
+from app.storage.sqlite import db_close, init_db
 
-bot = None
+API_TOKEN = application.API_TOKEN
+LZT_BALANCE_ID = application.LZT_BALANCE_ID
+autobuy_queue_manager = application.autobuy_queue_manager
+dp = application.dp
+error_reporter_loop = application.error_reporter_loop
+has_valid_telegram_token = application.has_valid_telegram_token
+logger = application.logger
+
+bot: Bot | None = None
 
 
 async def main():
@@ -29,8 +28,6 @@ async def main():
         raise RuntimeError("Некорректный API_TOKEN: бот не может быть запущен")
 
     bot = Bot(token=API_TOKEN)
-    # Keep the application module's shared bot reference in sync.
-    import app.application as application
     application.bot = bot
 
     try:
@@ -42,6 +39,12 @@ async def main():
     error_task = asyncio.create_task(error_reporter_loop())
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    except TelegramUnauthorizedError:
+        logger.exception("POLLING_UNAUTHORIZED invalid telegram token")
+        raise
+    except TelegramConflictError:
+        logger.exception("POLLING_CONFLICT another polling/webhook instance is running")
+        raise
     finally:
         error_task.cancel()
         await asyncio.gather(error_task, return_exceptions=True)
