@@ -2,9 +2,9 @@ name: tests
 
 on:
   push:
-    branches: ["main", "refactor-v2", "fix/**"]
+    branches: ["main", "refactor-v2", "refactor/**", "fix/**"]
   pull_request:
-    branches: ["main", "refactor-v2"]
+    branches: ["main", "refactor-v2", "refactor/**"]
 
 permissions:
   contents: read
