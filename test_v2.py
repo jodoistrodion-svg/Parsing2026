@@ -338,3 +338,26 @@ def test_closed_access_requires_owner_configuration():
     finally:
         settings.ACCESS_OPEN = original_open
         settings.OWNER_IDS = original_owners
+
+
+def test_all_project_modules_import():
+    import importlib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent
+    failures = []
+    for path in root.rglob("*.py"):
+        if "__pycache__" in path.parts or path.name == "test_v2.py":
+            continue
+        relative = path.relative_to(root).with_suffix("")
+        parts = relative.parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if not parts:
+            continue
+        module_name = ".".join(parts)
+        try:
+            importlib.import_module(module_name)
+        except Exception as exc:
+            failures.append(f"{module_name}: {type(exc).__name__}: {exc}")
+    assert failures == []
