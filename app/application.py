@@ -133,7 +133,9 @@ logger = setup_logging(AUTOBUY_LOG_FILE, LOG_MAX_BYTES, LOG_ROTATE_KEEP)
 
 
 def _safe_compact(s: str, n: int = 400) -> str:
-    s = (s or "").replace("\n", "\\n").replace("\r", "\\r")
+    s = (s or "").replace("
+", "\
+").replace("\r", "\\r")
     if len(s) <= n:
         return s
     return s[: n - 20] + f"...(len={len(s)})"
@@ -151,21 +153,33 @@ async def error_reporter_loop():
 
 # ====================== START MESSAGES ======================
 START_MSG_1 = (
-    "🤖 Parsing Bot 🤖\n"
-    "😶‍🌫️Отслеживание новых лотов по вашим URL в один клик😶‍🌫️\n\n"
-    "🔗 Полезные ссылки, обязательно подписаться 🔗\n"
-    "• Канал поддержки: https://t.me/+wHlSL7Ij2rpjYmFi\n"
+    "🤖 Parsing Bot 🤖
+"
+    "😶‍🌫️Отслеживание новых лотов по вашим URL в один клик😶‍🌫️
+
+"
+    "🔗 Полезные ссылки, обязательно подписаться 🔗
+"
+    "• Канал поддержки: https://t.me/+wHlSL7Ij2rpjYmFi
+"
     "• Создатель: https://t.me/StaliNusshhAaaaaa😶‍🌫️"
 )
 
 START_MSG_2 = (
-    "🧭 <b>Главное меню</b>\n"
-    "╭────────────────────╮\n"
-    "│ ✨ Проверка лотов — до 10 свежих карточек\n"
-    "│ 📚 Мои URL — источники, тест, автобай\n"
-    "│ 📊 Статус — охотник, баланс, API-ошибки\n"
-    "│ 🚀 Старт охотника — непрерывный мониторинг\n"
-    "│ ♻️ Сбросить историю — считать все лоты новыми\n"
+    "🧭 <b>Главное меню</b>
+"
+    "╭────────────────────╮
+"
+    "│ ✨ Проверка лотов — до 10 свежих карточек
+"
+    "│ 📚 Мои URL — источники, тест, автобай
+"
+    "│ 📊 Статус — охотник, баланс, API-ошибки
+"
+    "│ 🚀 Старт охотника — непрерывный мониторинг
+"
+    "│ ♻️ Сбросить историю — считать все лоты новыми
+"
     "╰────────────────────╯"
 )
 
@@ -176,7 +190,9 @@ WELCOME_STICKERS = [
 ]
 
 DENIED_TEXT = (
-    "⛔️ Доступ к боту закрыт по умолчанию.\n\n"
+    "⛔️ Доступ к боту закрыт по умолчанию.
+
+"
     "Нажми кнопку ниже, чтобы отправить запрос владельцу."
 )
 
@@ -645,10 +661,15 @@ async def show_urls_list_screen(user_id: int, chat_id: int, page: int = 0):
     enabled_count = sum(1 for s in sources if s.get("enabled", True))
     autobuy_count = sum(1 for s in sources if s.get("autobuy", False))
     title = (
-        f"📄 <b>Список URL</b> · всего: <b>{len(sources)}</b>\n"
-        f"├ 🟢 Активных: <b>{enabled_count}</b>\n"
-        f"├ 🛒 С автобаем: <b>{autobuy_count}</b>\n"
-        f"└ 📑 Страница: <b>{page + 1}/{total_pages}</b>\n\n"
+        f"📄 <b>Список URL</b> · всего: <b>{len(sources)}</b>
+"
+        f"├ 🟢 Активных: <b>{enabled_count}</b>
+"
+        f"├ 🛒 С автобаем: <b>{autobuy_count}</b>
+"
+        f"└ 📑 Страница: <b>{page + 1}/{total_pages}</b>
+
+"
         "Нажми на нужный URL, чтобы открыть детали."
     )
     await send_screen(chat_id, user_id, title, reply_markup=build_urls_picker_kb(sources, page=page, back_text="⬅️ Назад"), parse_mode="HTML")
@@ -673,9 +694,12 @@ async def show_users_screen(user_id: int, chat_id: int, page: int = 0):
 
     allowed_count = sum(1 for _uid, allowed, _role in users if allowed)
     text = (
-        f"👥 Пользователи: {total}\n"
-        f"• На странице: {len(users)}\n"
-        f"• Разрешено на странице: {allowed_count}\n"
+        f"👥 Пользователи: {total}
+"
+        f"• На странице: {len(users)}
+"
+        f"• Разрешено на странице: {allowed_count}
+"
         "Нажми на пользователя, чтобы переключить доступ."
     )
     await send_screen(chat_id, user_id, text, reply_markup=build_users_picker_kb(users, page=page))
@@ -763,7 +787,8 @@ def normalize_url(url: str) -> str:
     if not url:
         return url
 
-    s = (url or "").strip().replace(" ", "").replace("\t", "").replace("\n", "")
+    s = (url or "").strip().replace(" ", "").replace("	", "").replace("
+", "")
     parts = urlsplit(s)
 
     scheme = parts.scheme or "https"
@@ -1032,11 +1057,22 @@ def make_card(item: dict, source_name: str) -> str:
         lines.append(html.escape(clean))
     lines.append("╚══════════════════════════════════╝")
 
-    card = "\n".join(lines)
+    card = "
+".join(lines)
     if len(card) > SHORT_CARD_MAX:
-        return card[: SHORT_CARD_MAX - 120] + "\n… <i>(часть текста скрыта из-за лимита Telegram)</i>\n╚══════════════════════════════════╝"
+        return card[: SHORT_CARD_MAX - 120] + "
+… <i>(часть текста скрыта из-за лимита Telegram)</i>
+╚══════════════════════════════════╝"
     return card
 
 
 
-# Explicit export list lets extracted modules share the completed application namespace.\n__all__ = [name for name in globals() if not name.startswith("__")]\n\n# Infrastructure is imported only after the application definitions exist.\nfrom app.storage.sqlite import *\nfrom app.services.market_api import *\nfrom app.purchase.autobuy import *\nfrom app import handlers as _handlers\n\n
+# Explicit export list lets extracted modules share the completed application namespace.
+__all__ = [name for name in globals() if not name.startswith("__")]
+
+# Infrastructure is imported only after the application definitions exist.
+from app.storage.sqlite import *
+from app.services.market_api import *
+from app.purchase.autobuy import *
+from app import handlers as _handlers
+
