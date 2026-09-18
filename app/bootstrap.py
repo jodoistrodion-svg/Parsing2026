@@ -35,8 +35,8 @@ async def main():
     except Exception as e:
         logger.warning("WEBHOOK_DELETE_ERR err=%s", application._safe_compact(str(e), 180))
 
-    await init_db()
     try:
+        await init_db()
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     except TelegramUnauthorizedError:
         logger.exception("POLLING_UNAUTHORIZED invalid telegram token")
