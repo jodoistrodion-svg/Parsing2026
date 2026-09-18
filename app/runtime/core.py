@@ -35,6 +35,7 @@ from config import API_TOKEN as _API_TOKEN, LZT_API_KEY as _LZT_API_KEY
 
 from app.config.settings import *
 from market.normalize import normalize_url, validate_market_url
+from market.discovery import _run_bounded
 
 logger = setup_logging(AUTOBUY_LOG_FILE, LOG_MAX_BYTES, LOG_ROTATE_KEEP)
 
@@ -691,15 +692,10 @@ async def fetch_all_sources(user_id: int):
     if not sources:
         return [], []
 
-    # Для минимальной задержки автобая сначала запускаем опрос URL с включённым автобаем.
     sources.sort(key=lambda s: (not bool(s.get("autobuy", False)), s.get("idx", 0)))
-
-    tasks = [asyncio.create_task(_fetch_source_items(s)) for s in sources]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
     items_with_sources = []
     errors = []
-    for res in results:
+    async for res in _run_bounded(sources, _fetch_source_items):
         if isinstance(res, Exception):
             errors.append(("UNKNOWN", "UNKNOWN", str(res)))
             continue
@@ -707,9 +703,7 @@ async def fetch_all_sources(user_id: int):
         if err:
             errors.append((source_info["name"], source_info["url"], err))
             continue
-        for it in items:
-            items_with_sources.append((it, source_info))
-
+        items_with_sources.extend((it, source_info) for it in items)
     return items_with_sources, errors
 
 
@@ -717,57 +711,22 @@ async def iter_sources_results(user_id: int):
     sources = await get_all_sources(user_id, enabled_only=True)
     if not sources:
         return
-
-    # Для минимальной задержки автобая сначала запускаем опрос URL с включённым автобаем.
     sources.sort(key=lambda s: (not bool(s.get("autobuy", False)), s.get("idx", 0)))
-
-    tasks = [asyncio.create_task(_fetch_source_items(s)) for s in sources]
-    try:
-        for fut in asyncio.as_completed(tasks):
-            try:
-                yield await fut
-            except Exception as e:
-                yield {"idx": -1, "url": "UNKNOWN", "name": "UNKNOWN", "enabled": True, "autobuy": False}, [], str(e)
-    finally:
-        for t in tasks:
-            if not t.done():
-                t.cancel()
+    async for result in _run_bounded(sources, _fetch_source_items):
+        yield result
 
 
 async def iter_sources_results_split(user_id: int, include_non_autobuy: bool):
     sources = await get_all_sources(user_id, enabled_only=True)
     if not sources:
         return
-
     autobuy_sources = [s for s in sources if s.get("autobuy", False)]
     plain_sources = [s for s in sources if not s.get("autobuy", False)]
 
-    if not autobuy_sources and not (include_non_autobuy and plain_sources):
-        return
-
-    async def _run_group(group_sources: list[dict]):
-        if not group_sources:
-            return
-
-        tasks = [asyncio.create_task(_fetch_source_items(s)) for s in group_sources]
-        try:
-            for fut in asyncio.as_completed(tasks):
-                try:
-                    yield await fut
-                except Exception as e:
-                    yield {"idx": -1, "url": "UNKNOWN", "name": "UNKNOWN", "enabled": True, "autobuy": False}, [], str(e)
-        finally:
-            for t in tasks:
-                if not t.done():
-                    t.cancel()
-
-    # В первую очередь опрашиваем URL с автобаем, чтобы не ставить покупку
-    # в очередь за обычными источниками на глобальном rate-limit bucket.
-    async for result in _run_group(autobuy_sources):
+    async for result in _run_bounded(autobuy_sources, _fetch_source_items):
         yield result
-
     if include_non_autobuy:
-        async for result in _run_group(plain_sources):
+        async for result in _run_bounded(plain_sources, _fetch_source_items):
             yield result
 
 
