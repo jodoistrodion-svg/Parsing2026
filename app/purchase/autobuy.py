@@ -268,16 +268,19 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
     headers_form = {**common_headers, "Content-Type": "application/x-www-form-urlencoded"}
 
     async def _post_buy(idx: int, buy_url: str):
+        post_started = time.perf_counter()
         try:
             bucket, min_interval = _api_limit_bucket("POST", buy_url)
 
             await request_rate_limiter.wait(bucket, min_interval)
+            t4 = time.perf_counter()
             async with session.post(buy_url, headers=headers_json, json=payload, timeout=FAST_AUTOBUY_TIMEOUT) as resp:
                 body = await resp.text()
+                t5 = time.perf_counter()
                 state, info, force_form = _autobuy_classify_response(resp.status, body)
                 log_autobuy(
                     f"BUY_DIRECT item_id={item_id} attempt={idx}/{len(attempt_urls)} "
-                    f"status={resp.status} state={state} mode=json url={buy_url} info='{_safe_compact(info,220)}'"
+                    f"status={resp.status} state={state} mode=json url={buy_url} post_ms={int((t5-t4)*1000)} total_ms={int((t5-post_started)*1000)} info='{_safe_compact(info,220)}'"
                 )
 
             if force_form:
@@ -285,10 +288,11 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
                 # чтобы не терять драгоценные миллисекунды на hot-path автобая.
                 async with session.post(buy_url, headers=headers_form, data=payload, timeout=FAST_AUTOBUY_TIMEOUT) as resp_form:
                     body_form = await resp_form.text()
+                    t5_form = time.perf_counter()
                     state_form, info_form, _ = _autobuy_classify_response(resp_form.status, body_form)
                     log_autobuy(
                         f"BUY_DIRECT item_id={item_id} attempt={idx}/{len(attempt_urls)} "
-                        f"status={resp_form.status} state={state_form} mode=form url={buy_url} info='{_safe_compact(info_form,220)}'"
+                        f"status={resp_form.status} state={state_form} mode=form url={buy_url} post_ms={int((t5_form-t4)*1000)} total_ms={int((t5_form-post_started)*1000)} info='{_safe_compact(info_form,220)}'"
                     )
                     return idx, buy_url, resp_form.status, state_form, info_form
 
@@ -334,6 +338,7 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
                 t_idx, t_url, status, state, info = await task
 
                 if state == "success":
+                    log_autobuy(f"BUY_T6_SUCCESS item_id={item_id} since_found_ms={int((time.perf_counter()-found_perf)*1000) if found_perf is not None else -1} attempt={t_idx}")
                     _remember_autobuy_endpoint(source_url, t_url)
                     for p in pending:
                         p.cancel()
@@ -457,6 +462,7 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
         await purchase_idempotency.release(item_key)
 
     dur_ms = int((time.perf_counter() - found_perf) * 1000)
+    log_autobuy(f"BUY_T6_RESULT item_id={item_id} since_found_ms={dur_ms} bought={int(bool(bought))}")
     bought_link = item.get("url") or item.get("link") or (f"https://lzt.market/{item_id}" if item_id is not None else "")
     lot_price = _extract_item_price(item)
     lot_time = _format_item_time_human(_extract_item_time(item))
