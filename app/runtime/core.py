@@ -26,6 +26,7 @@ from services.logging_setup import setup_logging
 
 from app.config.settings import (
     API_TOKEN,
+    LZT_BALANCE_ID,
     AUTOBUY_LOG_FILE,
     HUNTER_INTERVAL_BASE,
     LOG_MAX_BYTES,
