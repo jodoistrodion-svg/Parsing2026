@@ -28,7 +28,6 @@ from bot.ui import render_status_card
 from buyer.queue import UserAutobuyQueueManager
 from domain.decision import DecisionEngine
 from market.pipeline import DiscoveryPipeline
-from market.rate_limit import AdaptiveRateLimiter
 from purchase.idempotency import PurchaseIdempotency
 from services.logging_setup import setup_logging
 
@@ -375,7 +374,6 @@ user_buy_attempted = defaultdict(set)
 user_buy_inflight = defaultdict(set)
 autobuy_queue_manager = UserAutobuyQueueManager(maxsize=2500, workers_per_user=8)
 purchase_idempotency = PurchaseIdempotency()
-adaptive_rate_limiter = AdaptiveRateLimiter(safety_ms=5)
 user_hunter_tasks: dict[int, asyncio.Task] = {}
 user_hunter_start_locks: dict[int, asyncio.Lock] = {}
 user_history_reset_pending = defaultdict(lambda: False)
