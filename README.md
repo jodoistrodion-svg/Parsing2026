@@ -13,7 +13,7 @@
 
 ## Структура
 
-`main.py` — compatibility shell; hot-path компоненты находятся в пакетах `bot/`, `buyer/`, `domain/`, `filters/`, `market/`, `purchase/`, `services/`.
+`main.py` — process entry point. `app/application.py` — composition root. `app/runtime/core.py` — application runtime/state and orchestration helpers. `app/handlers.py` — Telegram handlers. `app/purchase/autobuy.py` — autobuy lifecycle/hot path. Infrastructure is isolated in `app/services/`, `app/storage/`, `market/`, `buyer/`, `purchase/`, `domain/`, `filters/`.
 
 ## Проверки
 
