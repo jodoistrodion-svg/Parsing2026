@@ -6,6 +6,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+_PLACEHOLDER_VALUES = {
+    "replace-with-telegram-bot-token",
+    "replace-with-lzt-api-key",
+    "replace-with-your-telegram-user-id",
+}
+
 
 def _normalize_telegram_token(raw: str | None) -> str:
     token = (raw or "").strip().strip('"').strip("'")
@@ -16,7 +22,12 @@ def _normalize_telegram_token(raw: str | None) -> str:
 
 def _cfg(name: str, fallback: str = "") -> str:
     value = os.getenv(name)
-    return value.strip() if value is not None and value.strip() else fallback.strip()
+    if value is None:
+        return fallback.strip()
+    cleaned = value.strip().strip('"').strip("'")
+    if not cleaned or cleaned.lower() in _PLACEHOLDER_VALUES:
+        return fallback.strip()
+    return cleaned
 
 
 def _int(name: str, default: int, minimum: int | None = None) -> int:
