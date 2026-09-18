@@ -457,6 +457,8 @@ def parse_index_from_button(text: str) -> int | None:
         return None
 
 
+from app.storage.sqlite import *
+from app.services.market_api import *
 # ====================== STATE ======================
 user_search_active = defaultdict(lambda: False)
 user_hunter_mode = defaultdict(lambda: "off")  # off/classic
@@ -820,6 +822,7 @@ def _item_sort_key(item: dict) -> tuple[int, int]:
     return ts, iid
 
 
+from app.purchase.autobuy import *
 # ====================== SOURCES ======================
 async def get_all_sources(user_id: int, enabled_only: bool = False):
     await load_user_data(user_id)
@@ -1039,4 +1042,11 @@ def make_card(item: dict, source_name: str) -> str:
 
 
 
-# Explicit export list lets extracted modules share the completed application namespace.\n__all__ = [name for name in globals() if not name.startswith("__")]\n\n# Infrastructure is imported only after the application definitions exist.\nfrom app.storage.sqlite import *\nfrom app.services.market_api import *\nfrom app.purchase.autobuy import *\nfrom app import handlers as _handlers\n\n
+# Explicit export list lets extracted modules share the completed application namespace.
+__all__ = [name for name in globals() if not name.startswith("__")]
+
+# Infrastructure is imported only after the application definitions exist.
+from app.storage.sqlite import *
+from app.services.market_api import *
+from app.purchase.autobuy import *
+from app import handlers as _handlers

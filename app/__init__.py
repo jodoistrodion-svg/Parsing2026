@@ -1,1 +1,1 @@
-"""Application layer for Parsing2026."""\n
+"""Application layer for Parsing2026."""
