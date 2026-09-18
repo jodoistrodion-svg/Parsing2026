@@ -118,8 +118,19 @@ LOG_MAX_BYTES = 15 * 1024 * 1024
 LOG_ROTATE_KEEP = 2
 BALANCE_CACHE_TTL = 60
 
+
+def validate_runtime_config() -> None:
+    errors = []
+    if not API_TOKEN:
+        errors.append("API_TOKEN is missing")
+    if not ACCESS_OPEN and not OWNER_IDS:
+        errors.append("OWNER_ID/OWNER_IDS is required when ACCESS_MODE=closed")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+
 __all__ = [
-    "API_TOKEN", "LZT_API_KEY", "LZT_BALANCE_ID",
+    "API_TOKEN", "LZT_API_KEY", "validate_runtime_config", "LZT_BALANCE_ID",
     "OWNER_ID", "OWNER_IDS", "ACCESS_MODE", "ACCESS_OPEN",
     "HUNTER_INTERVAL_BASE", "FETCH_TIMEOUT", "BUY_TIMEOUT",
     "RETRY_MAX", "RETRY_BASE_DELAY", "SHORT_CARD_MAX",
