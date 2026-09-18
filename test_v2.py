@@ -361,3 +361,13 @@ def test_all_project_modules_import():
         except Exception as exc:
             failures.append(f"{module_name}: {type(exc).__name__}: {exc}")
     assert failures == []
+
+
+def test_autobuy_response_classifier_requires_explicit_success():
+    from app.purchase.autobuy import _autobuy_classify_response
+
+    assert _autobuy_classify_response(200, '{"success": true}')[0] == "success"
+    assert _autobuy_classify_response(200, '{"status": "ok"}')[0] == "success"
+    assert _autobuy_classify_response(200, "secret answer required")[0] == "secret"
+    assert _autobuy_classify_response(200, "cookie accepted")[0] == "retry"
+    assert _autobuy_classify_response(200, "")[0] == "success"
