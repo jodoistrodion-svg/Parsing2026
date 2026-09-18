@@ -730,6 +730,38 @@ async def iter_sources_results_split(user_id: int, include_non_autobuy: bool):
             yield result
 
 
+async def send_compact_10_for_user(user_id: int, chat_id: int):
+    sources = await get_all_sources(user_id, enabled_only=True)
+    if not sources:
+        await send_screen(chat_id, user_id, "❌ Нет активных URL.", reply_markup=kb_main(user_id))
+        return
+    items_with_sources, errors = await fetch_all_sources(user_id)
+    if not items_with_sources:
+        detail = "❌ Свежих лотов не найдено."
+        if errors:
+            detail += f"\nОшибок источников: {len(errors)}"
+        await send_screen(chat_id, user_id, detail, reply_markup=kb_main(user_id))
+        return
+    for item, source in items_with_sources[:10]:
+        try:
+            await send_bot_message(chat_id, make_card(item, source.get("name") or "Источник"), parse_mode="HTML", disable_web_page_preview=True)
+        except Exception as e:
+            log_autobuy(f"LOT_CHECK_SEND_ERR user_id={user_id} err='{_safe_compact(str(e),240)}'")
+
+
+async def send_test_for_single_url(user_id: int, chat_id: int, source: dict):
+    source_info = _build_source_info(source)
+    items, err = await fetch_with_retry(source_info["url"], max_retries=2)
+    if err:
+        await send_screen(chat_id, user_id, f"❌ Ошибка проверки URL:\n{html.escape(str(err))}", reply_markup=kb_urls_menu())
+        return
+    if not items:
+        await send_screen(chat_id, user_id, f"✅ URL отвечает, но лотов сейчас нет.\n<code>{html.escape(source_info['url'])}</code>", reply_markup=kb_urls_menu(), parse_mode="HTML")
+        return
+    await send_screen(chat_id, user_id, f"✅ URL отвечает. Найдено лотов: <b>{len(items)}</b>\nПоказываю первый.", reply_markup=kb_urls_menu(), parse_mode="HTML")
+    await send_bot_message(chat_id, make_card(items[0], source_info["name"]), parse_mode="HTML", disable_web_page_preview=True)
+
+
 # ====================== DISPLAY ======================
 def make_card(item: dict, source_name: str) -> str:
     title = str(item.get("title", "Без названия"))
