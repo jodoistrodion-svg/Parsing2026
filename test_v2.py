@@ -41,3 +41,11 @@ def test_discovery_autobuy_first_wave():
         task=asyncio.create_task(it.__anext__()); await asyncio.sleep(0); await asyncio.sleep(0); first=set(started); release.set(); await task
         return first
     assert asyncio.run(run())=={"buy1","buy2"}
+
+
+def test_item_sort_key_accepts_iso8601():
+    from market.pipeline import _item_sort_key
+    old = _item_sort_key({"id": 1, "published_at": "2026-09-18T10:00:00Z"})
+    new = _item_sort_key({"id": 2, "published_at": "2026-09-18T10:01:00+00:00"})
+    assert old[0] > 0
+    assert new[0] > old[0]
