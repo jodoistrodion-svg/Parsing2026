@@ -51,6 +51,23 @@ def test_item_sort_key_accepts_iso8601():
     assert new[0] > old[0]
 
 
+def test_retry_count_is_retries_plus_initial_attempt():
+    import app.services.market_api as market_api
+    async def run():
+        calls=[]
+        original=market_api.fetch_items_raw
+        async def fake(*args, **kwargs):
+            calls.append(1)
+            return None, "temporary", 0
+        market_api.fetch_items_raw=fake
+        try:
+            await market_api.fetch_with_retry("https://api.lzt.market/mihoyo", max_retries=2)
+        finally:
+            market_api.fetch_items_raw=original
+        return len(calls)
+    assert asyncio.run(run()) == 3
+
+
 def test_main_entrypoint_imports():
     import main
     assert callable(main.main)
