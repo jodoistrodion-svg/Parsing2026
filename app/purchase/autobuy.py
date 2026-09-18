@@ -17,20 +17,16 @@ from app.config.settings import (
     MAX_NEW_ITEMS_PER_CYCLE, NON_AUTOBUY_CYCLE_EVERY,
 )
 from app.runtime.core import (
-    _format_value, _safe_compact, autobuy_endpoint_cache, autobuy_queue_manager,
+    bot, _format_value, _safe_compact, autobuy_endpoint_cache, autobuy_queue_manager,
     buy_semaphore, enqueue_hunter_notification, ensure_notify_worker, get_buy_lock,
     load_user_data, log_autobuy, make_card, make_item_key, reset_no_lots_message,
     send_bot_message, user_api_errors, user_buy_attempted, user_buy_inflight,
     user_hunter_interval, user_hunter_mode, user_hunter_tasks, user_notify_queues,
     user_notify_workers, user_search_active, user_seen_items,
 )
-from app.services.market_api import _api_limit_bucket, _default_api_headers, get_session
+from app.services.market_api import _api_limit_bucket, _default_api_headers, get_session, request_rate_limiter
 from app.storage.sqlite import db_mark_buy_attempted, db_mark_seen_batch
 from bot.autobuy_strategy import build_buy_urls, prioritize_buy_urls
-from buyer.queue import UserAutobuyQueueManager
-from domain.decision import DecisionEngine
-from market.pipeline import DiscoveryPipeline
-from purchase.idempotency import PurchaseIdempotency
 
 def _autobuy_buy_urls(source_url: str, item_id: int):
     return build_buy_urls(source_url, item_id)
@@ -151,6 +147,7 @@ def _autobuy_retry_delay(is_queue: bool) -> float:
 def _autobuy_should_retry_by_info(info: str) -> bool:
     low = (info or "").lower()
     if any(x in low for x in (
+        "lzt_api_key не задан",
         "ошибка авторизации", "authorization", "unauthorized", "forbidden", "access denied",
         "недостаточно", "insufficient", "already sold", "already bought", "already purchased",
         "уже продан", "нельзя купить", "ручная проверка", "secret",
