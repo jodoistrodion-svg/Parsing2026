@@ -16,10 +16,6 @@ dp = application.dp
 has_valid_telegram_token = application.has_valid_telegram_token
 logger = application.logger
 
-async def error_reporter_loop():
-    while True:
-        await asyncio.sleep(ERROR_REPORT_INTERVAL)
-
 bot: Bot | None = None
 
 
