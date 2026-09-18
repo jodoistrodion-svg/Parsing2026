@@ -557,7 +557,7 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
     async def enqueue_autobuy(source: dict, item: dict, found_perf: float):
         key = make_item_key(item)
         if key in user_buy_attempted[user_id] or key in user_buy_inflight[user_id]:
-            return
+            return False
         user_buy_inflight[user_id].add(key)
         try:
             admitted = await autobuy_queue_manager.enqueue(
