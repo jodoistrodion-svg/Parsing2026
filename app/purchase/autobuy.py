@@ -85,8 +85,10 @@ def _autobuy_classify_response(status: int, text: str):
         success_flag = data.get("success")
         if status_flag in {"error", "failed", "fail"} or success_flag is False:
             return "retry", raw[:220], False
+        if status_flag in {"success", "ok", "purchased", "complete", "completed", "done"} or success_flag is True:
+            return "success", raw[:220], False
 
-    success_markers = ("success", "ok", "purchased", "purchase complete", "already bought", "уже куп")
+    success_markers = ("success", "purchased", "purchase complete", "already bought", "уже куп")
     terminal_error_markers = (
         "insufficient", "not enough", "недостаточно", "уже продан", "already sold",
         "already purchased", "already bought", "цена изменилась", "нельзя купить",
