@@ -1,4 +1,4 @@
-"""Process entry point for Parsing2026."""
+"""Production process entry point for Parsing2026."""
 
 import asyncio
 
@@ -6,4 +6,7 @@ from app.bootstrap import main
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

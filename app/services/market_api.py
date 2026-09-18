@@ -4,15 +4,27 @@ import asyncio
 import json
 import random
 import time
-import aiohttp
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 
+import aiohttp
+
 from app.config.settings import (
-    BALANCE_CACHE_TTL, BUY_MIN_REQUEST_INTERVAL, FETCH_TIMEOUT, LZT_BALANCE_ID,
-    LZT_API_KEY, MAX_CONCURRENT_REQUESTS, OTHER_MIN_REQUEST_INTERVAL,
-    RETRY_BASE_DELAY, RETRY_MAX, SEARCH_MIN_REQUEST_INTERVAL,
+    BALANCE_CACHE_TTL,
+    BUY_MIN_REQUEST_INTERVAL,
+    FETCH_TIMEOUT,
+    LZT_API_KEY,
+    LZT_BALANCE_ID,
+    LZT_BASE_URL,
+    MAX_CONCURRENT_REQUESTS,
+    OTHER_MIN_REQUEST_INTERVAL,
+    RETRY_BASE_DELAY,
+    RETRY_MAX,
+    RETRY_MAX_DELAY,
+    SEARCH_MIN_REQUEST_INTERVAL,
 )
 from market.rate_limit import AdaptiveRateLimiter
+from metrics.events import METRICS
 
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 adaptive_rate_limiter = AdaptiveRateLimiter(safety_ms=5)
@@ -75,7 +87,7 @@ def _api_limit_bucket(method: str, url: str) -> tuple[str, float]:
 def _default_api_headers() -> dict[str, str]:
     headers = {
         "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; ParsingBot/1.0; +https://api.lzt.market/)",
+        "User-Agent": "Mozilla/5.0 (compatible; Parsing2026/3.x; +https://api.lzt.market/)",
         "Referer": "https://zelenka.guru/",
     }
     if LZT_API_KEY:
@@ -88,7 +100,11 @@ async def get_session():
     if _global_session is None or _global_session.closed:
         timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT, connect=3, sock_connect=3, sock_read=FETCH_TIMEOUT)
         connector = aiohttp.TCPConnector(limit=256, limit_per_host=128, ttl_dns_cache=300, enable_cleanup_closed=True)
-        _global_session = aiohttp.ClientSession(timeout=timeout, connector=connector)
+        _global_session = aiohttp.ClientSession(
+            timeout=timeout,
+            connector=connector,
+            trust_env=True,
+        )
     return _global_session
 
 
@@ -99,72 +115,106 @@ async def close_session():
         _global_session = None
 
 
+def _retry_after_seconds(headers) -> float | None:
+    raw = headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        try:
+            dt = parsedate_to_datetime(raw)
+            return max(0.0, dt.timestamp() - time.time())
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+
 async def fetch_items_raw(url: str, request_timeout: float | None = None):
     bucket, min_interval = _api_limit_bucket("GET", url)
     await request_rate_limiter.wait(bucket, min_interval)
-    # Server-header limiter is dormant until the server reports exhaustion; it
-    # never adds a fixed delay to the normal discovery hot path.
     await adaptive_rate_limiter.before_request(bucket)
+
     headers = _default_api_headers()
     timeout_value = max(0.2, float(request_timeout if request_timeout is not None else FETCH_TIMEOUT))
+
     try:
         session = await get_session()
+        started = time.perf_counter()
         async with session.get(url, headers=headers, timeout=timeout_value) as resp:
+            elapsed = int((time.perf_counter() - started) * 1000)
             await adaptive_rate_limiter.observe(bucket, resp.headers)
-            text = await resp.text()
+            METRICS.inc("market_requests_total", labels={"method": "GET", "bucket": bucket, "status": resp.status // 100})
+            METRICS.observe("market_request_latency_ms", elapsed, labels={"bucket": bucket})
+            body = await resp.text()
+
+            if resp.status == 429:
+                retry_after = _retry_after_seconds(resp.headers)
+                if retry_after is not None:
+                    await adaptive_rate_limiter.note_retry_after(bucket, retry_after)
+                return None, f"HTTP 429: {body[:300]}", resp.status
 
             if resp.status in (400, 401, 403, 404):
-                return None, f"HTTP {resp.status}: {text[:300]}", resp.status
+                return None, f"HTTP {resp.status}: {body[:300]}", resp.status
+
+            if 500 <= resp.status <= 599 or resp.status in (408, 425):
+                return None, f"HTTP {resp.status}: {body[:300]}", resp.status
 
             try:
-                data = json.loads(text)
+                data = json.loads(body)
             except Exception:
-                return None, f"❌ API вернул не JSON:\n{text[:300]}", resp.status
+                return None, f"API returned non-JSON: {body[:300]}", resp.status
+
+            if not isinstance(data, dict):
+                return None, "API returned a non-object JSON response", resp.status
 
             items = data.get("items")
             if not isinstance(items, list):
-                return None, "⚠ API не вернул список items", resp.status
+                return None, "API did not return an items list", resp.status
 
             return items, None, resp.status
-
     except asyncio.TimeoutError:
-        return None, "❌ Таймаут запроса", 0
-    except aiohttp.ClientError as e:
-        return None, f"❌ Ошибка сети: {e}", 0
-    except Exception as e:
-        return None, f"❌ Ошибка: {e}", 0
+        METRICS.inc("market_request_errors_total", labels={"kind": "timeout"})
+        return None, "request timeout", 0
+    except aiohttp.ClientError as exc:
+        METRICS.inc("market_request_errors_total", labels={"kind": "client"})
+        return None, f"network error: {exc}", 0
+    except Exception as exc:
+        METRICS.inc("market_request_errors_total", labels={"kind": "unexpected"})
+        return None, f"request error: {exc}", 0
 
 
-async def fetch_with_retry(url: str, max_retries: int = RETRY_MAX, request_timeout: float | None = None):
-    attempt = 0
+async def fetch_with_retry(
+    url: str,
+    max_retries: int = RETRY_MAX,
+    request_timeout: float | None = None,
+):
     retries = max(0, int(max_retries))
-    attempts = retries + 1
-    delay = RETRY_BASE_DELAY
+    delay = max(0.0, RETRY_BASE_DELAY)
 
-    while attempt < attempts:
-        attempt += 1
-        try:
-            async with semaphore:
-                items, err, status = await fetch_items_raw(url, request_timeout=request_timeout)
-        except Exception as e:
-            items, err, status = None, f"❌ Ошибка: {e}", 0
+    for attempt in range(retries + 1):
+        async with semaphore:
+            items, err, status = await fetch_items_raw(
+                url,
+                request_timeout=request_timeout,
+            )
 
         if err is None:
             return items, None
 
-        if status in (400, 401, 403, 404):
+        retryable = status == 429 or status in (408, 425) or 500 <= status <= 599 or status == 0
+        if not retryable or attempt >= retries:
+            METRICS.inc(
+                "market_failures_total",
+                labels={"status": str(status or "network")},
+            )
             return [], err
 
-        if attempt >= attempts:
-            return [], err
+        backoff = min(RETRY_MAX_DELAY, max(0.0, delay))
+        jitter = random.uniform(0.0, min(0.05, backoff * 0.2))
+        await asyncio.sleep(backoff + jitter)
+        delay = min(RETRY_MAX_DELAY, max(delay * 2.0, RETRY_BASE_DELAY))
 
-        jitter = random.uniform(0, delay * 0.2)
-        await asyncio.sleep(delay + jitter)
-        delay *= 2
-
-    return [], "❌ Не удалось получить ответ"
-
-
+    return [], "request retry budget exhausted"
 
 
 def _format_money(v) -> str:
@@ -241,6 +291,7 @@ async def get_account_buy_balance_text(force: bool = False) -> str:
 
     headers = _default_api_headers()
     urls = [
+        f"{LZT_BASE_URL}/balance/exchange",
         "https://prod-api.lzt.market/balance/exchange",
         "https://api.lzt.market/balance/exchange",
     ]
