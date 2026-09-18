@@ -19,6 +19,7 @@ async def db_conn() -> aiosqlite.Connection:
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA synchronous=NORMAL")
         await _db.execute("PRAGMA foreign_keys=ON")
+        await _db.execute("PRAGMA busy_timeout=5000")
     return _db
 
 
@@ -33,18 +34,24 @@ async def db_execute(query: str, params: tuple = (), commit: bool = False):
     db = await db_conn()
     async with _db_lock:
         cur = await db.execute(query, params)
-        if commit:
-            await db.commit()
-        return cur
+        try:
+            if commit:
+                await db.commit()
+            return cur
+        finally:
+            await cur.close()
 
 
 async def db_executemany(query: str, params_seq, commit: bool = False):
     db = await db_conn()
     async with _db_lock:
         cur = await db.executemany(query, params_seq)
-        if commit:
-            await db.commit()
-        return cur
+        try:
+            if commit:
+                await db.commit()
+            return cur
+        finally:
+            await cur.close()
 
 
 async def db_fetchone(query: str, params: tuple = ()):
@@ -203,11 +210,14 @@ async def db_get_urls(user_id: int):
 
 async def db_add_url(user_id: int, url: str, name: str):
     await db_execute(
-        "INSERT OR IGNORE INTO urls(user_id, url, name, added_at, enabled, autobuy) VALUES (?, ?, ?, ?, 1, 0)",
+        """
+        INSERT INTO urls(user_id, url, name, added_at, enabled, autobuy)
+        VALUES (?, ?, ?, ?, 1, 0)
+        ON CONFLICT(user_id, url) DO UPDATE SET name=excluded.name
+        """,
         (user_id, url, name or "", int(time.time())),
         commit=True,
     )
-    await db_execute("UPDATE urls SET name=? WHERE user_id=? AND url=?", (name or "", user_id, url), commit=True)
 
 
 async def db_set_url_name(user_id: int, url: str, name: str):
