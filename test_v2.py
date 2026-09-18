@@ -261,3 +261,43 @@ def test_pipeline_does_not_mark_lot_seen_when_autobuy_queue_rejects():
     assert stats.queue_rejected == 1
     assert seen == []
     assert rejected == 1
+
+
+def test_normalize_market_url_does_not_rewrite_query_values():
+    from market.normalize import normalize_url
+
+    got = normalize_url(
+        "https://api.lzt.market/mihoyo?note=orderby%3Dweird&orderby=pdate_to_down"
+    )
+    assert "note=orderby%3Dweird" in got
+    assert "order_by=pdate_to_down" in got
+    assert "orderby%3Dweird" in got
+
+
+def test_normalize_strips_credentials_and_normalizes_alias_host():
+    from market.normalize import normalize_url, validate_market_url
+
+    raw = "https://user:pass@www.lzt.market:443/mihoyo"
+    ok, error = validate_market_url(raw)
+    assert ok is True and error is None
+    got = normalize_url(raw)
+    assert got.startswith("https://api.lzt.market/mihoyo?")
+    assert "user%3Apass" not in got
+    assert "@" not in got
+
+
+def test_purchase_claim_cannot_be_released_by_another_task():
+    from purchase.idempotency import PurchaseIdempotency
+
+    async def run():
+        manager = PurchaseIdempotency()
+        assert await manager.claim("id::1") is True
+        released = await asyncio.create_task(_release_from_other_task(manager, "id::1"))
+        assert released is False
+        assert manager.claimed("id::1") is True
+        assert await manager.release("id::1") is True
+
+    async def _release_from_other_task(manager, key):
+        return await manager.release(key)
+
+    asyncio.run(run())
