@@ -934,45 +934,8 @@ def make_card(item: dict, source_name: str) -> str:
 
 # Explicit export list lets extracted modules share the completed application namespace.
 
-async def main():
-    global bot
-    logger.info("BOT_START mode=classic balance_id=%s", LZT_BALANCE_ID)
 
-    if not has_valid_telegram_token(API_TOKEN):
-        raise RuntimeError("Некорректный API_TOKEN: бот не может быть запущен")
-
-    bot = Bot(token=API_TOKEN)
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-    except Exception as e:
-        logger.warning("WEBHOOK_DELETE_ERR err=%s", _safe_compact(str(e), 180))
-
-    await init_db()
-    error_task = asyncio.create_task(error_reporter_loop())
-
-    try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    except TelegramUnauthorizedError:
-        logger.exception("POLLING_UNAUTHORIZED invalid telegram token")
-        raise
-    except TelegramConflictError:
-        logger.exception("POLLING_CONFLICT another polling/webhook instance is running")
-        raise
-    finally:
-        error_task.cancel()
-        await asyncio.gather(error_task, return_exceptions=True)
-        await autobuy_queue_manager.shutdown()
-        await close_session()
-        await db_close()
-        if bot is not None and getattr(bot, "session", None) is not None:
-            try:
-                await bot.session.close()
-            except Exception:
-                pass
-
-__all__ = [name for name in globals() if not name.startswith("__")]
-
-# Infrastructure is imported only after the application definitions exist.
+# Infrastructure is imported after application definitions so legacy shared helpers remain available.
 from app.storage.sqlite import *
 from app.services.market_api import *
 from app.purchase.autobuy import *
