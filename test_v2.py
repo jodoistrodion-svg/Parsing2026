@@ -319,3 +319,22 @@ def test_env_example_placeholder_does_not_activate_lzt_api():
         else:
             os.environ["LZT_API_KEY"] = original
         importlib.reload(settings)
+
+
+def test_closed_access_requires_owner_configuration():
+    import app.config.settings as settings
+
+    original_open = settings.ACCESS_OPEN
+    original_owners = settings.OWNER_IDS
+    try:
+        settings.ACCESS_OPEN = False
+        settings.OWNER_IDS = set()
+        try:
+            settings.validate_runtime_config()
+        except RuntimeError as exc:
+            assert "OWNER_ID/OWNER_IDS" in str(exc)
+        else:
+            raise AssertionError("closed access without owner must fail validation")
+    finally:
+        settings.ACCESS_OPEN = original_open
+        settings.OWNER_IDS = original_owners
