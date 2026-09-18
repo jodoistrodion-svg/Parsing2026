@@ -410,7 +410,7 @@ async def try_autobuy_item(source: dict, item: dict, found_perf: float | None = 
             i += 1
             max_attempt_window = _remaining_autobuy_window_sec(found_perf)
             if max_attempt_window is not None and max_attempt_window <= 0:
-                max_attempt_window = None
+                return False, f"attempt={i}/{attempts_limit if attempts_limit is not None else "∞"} | autobuy_total_retry_window_exceeded"
 
             bought, info = await _try_autobuy_once(source, item, found_perf=found_perf, max_duration_override=max_attempt_window)
             last_info = str(info)
