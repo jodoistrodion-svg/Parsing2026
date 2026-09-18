@@ -36,6 +36,20 @@ from config import API_TOKEN as _API_TOKEN, LZT_API_KEY as _LZT_API_KEY
 
 from app.config.settings import *
 
+logger = setup_logging(AUTOBUY_LOG_FILE, LOG_MAX_BYTES, LOG_ROTATE_KEEP)
+
+
+def _safe_compact(s: str, n: int = 400) -> str:
+    s = (s or "").replace("\n", "\\n").replace("\r", "\\r")
+    if len(s) <= n:
+        return s
+    return s[: n - 20] + f"...(len={len(s)})"
+
+
+def log_autobuy(line: str):
+    logger.info(line)
+
+
 bot: Bot | None = None
 dp = Dispatcher()
 
