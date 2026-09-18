@@ -99,6 +99,10 @@ def _autobuy_classify_response(status: int, text: str):
         "api key", "scope", "token", "unauthorized", "authorization", "bearer",
         "неверный ключ", "доступ запрещен", "доступ запрещён",
     )
+    secret_markers = (
+        "secret", "secret answer", "secret_word", "секретный ответ",
+        "требуется секрет",
+    )
 
     if status in (404, 405):
         return "retry", raw[:220], False
@@ -107,9 +111,13 @@ def _autobuy_classify_response(status: int, text: str):
             return "auth", raw[:220], False
         if any(marker in joined for marker in queue_markers):
             return "queue", raw[:220], False
+        if any(marker in joined for marker in secret_markers):
+            return "secret", raw[:220], False
         if any(marker in joined for marker in terminal_error_markers):
             return "terminal", raw[:220], False
-        return "success", raw[:220], False
+        if not raw.strip():
+            return "success", raw[:220], False
+        return "retry", raw[:220], False
     if status == 401:
         return "auth", raw[:220], False
     if status == 415:
@@ -119,6 +127,8 @@ def _autobuy_classify_response(status: int, text: str):
 
     if any(marker in joined for marker in queue_markers):
         return "queue", raw[:220], False
+    if any(marker in joined for marker in secret_markers):
+        return "secret", raw[:220], False
     if any(marker in joined for marker in success_markers):
         return "success", raw[:220], False
     if any(marker in joined for marker in terminal_error_markers):
