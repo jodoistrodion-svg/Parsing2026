@@ -28,8 +28,8 @@ line-length = 120
 exclude = [".git", ".venv", "venv", "build", "dist", "__pycache__"]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "B", "UP"]
-ignore = ["E501", "B008", "B904", "UP007"]
+select = ["E9", "F", "B"]
+ignore = ["B008", "B904"]
 
 [tool.ruff.lint.per-file-ignores]
 "test_v2.py" = ["B", "UP"]

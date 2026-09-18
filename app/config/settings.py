@@ -285,7 +285,6 @@ MAX_URL_NAME_LEN = settings.max_url_name_len
 SHORT_CARD_MAX = settings.short_card_max
 ERROR_REPORT_INTERVAL = settings.error_report_interval
 AUTOBUY_LOG_FILE = settings.autobuy_log_file
-TG_STARTUP_PROBE = settings.tg_startup_probe
 LOG_MAX_BYTES = 15 * 1024 * 1024
 LOG_ROTATE_KEEP = 2
 BALANCE_CACHE_TTL = 60

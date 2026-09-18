@@ -599,7 +599,7 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
                 make_key=make_item_key,
                 is_seen=lambda key: key in user_seen_items[user_id],
                 is_attempted=lambda key: key in user_buy_attempted[user_id] or key in user_buy_inflight[user_id],
-                mark_seen=lambda key: _mark_seen_and_batch(key, user_id, seen_batch),
+                mark_seen=lambda key, batch=seen_batch: _mark_seen_and_batch(key, user_id, batch),
                 enqueue_autobuy=enqueue_autobuy,
                 decision=DecisionEngine(),
                 max_items_per_source=MAX_ITEMS_PER_SOURCE_SCAN,
