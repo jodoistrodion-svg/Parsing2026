@@ -6,13 +6,14 @@ import time
 from aiogram import types
 from aiogram.filters import Command
 
+from app.config.settings import AUTOBUY_LOG_FILE, FETCH_TIMEOUT, HUNTER_INTERVAL_BASE, MAX_URL_NAME_LEN, OWNER_ID, OWNER_IDS, USER_ACTION_FETCH_TIMEOUT
 from app.runtime.core import (
     START_MSG_1, START_MSG_2, build_urls_picker_kb, dp, get_user_hunter_start_lock,
     kb_main, kb_request, kb_urls_menu, load_user_data, log_autobuy, normalize_url,
     parse_index_from_button, parse_user_id_from_button, safe_delete, sanitize_url_name,
     send_bot_message, send_screen, send_welcome_sticker, show_denied, show_status,
     show_urls_list_screen, show_users_screen, user_buy_attempted, user_history_reset_pending,
-    user_hunter_mode, user_last_screen_msg_id, user_modes, user_page_state,
+    user_hunter_mode, user_hunter_tasks, user_last_screen_msg_id, user_modes, user_page_state,
     user_pending_rename_url, user_pending_url, user_search_active, user_seen_items,
     user_url_limit, user_urls, validate_market_url, send_compact_10_for_user,
     send_test_for_single_url,
