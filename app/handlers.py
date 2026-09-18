@@ -435,4 +435,6 @@ async def buttons_handler(message: types.Message):
         await safe_delete(message)
 
 
+# Application composition lives here; main.py is only the process entry point.
+
 __all__ = [name for name in globals() if not name.startswith("__")]

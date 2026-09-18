@@ -1,12 +1,1 @@
-"""Process entry point for Parsing2026.
-
-Keep startup wiring here; application logic belongs to app.application.
-"""
-
-import asyncio
-
-from app.application import main
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+"""Process entry point for Parsing2026.\n\nKeep startup wiring here; application logic belongs to app.application.\n"""\n\nimport asyncio\n\nfrom app.application import main\n\n\nif __name__ == "__main__":\n    asyncio.run(main())\n
