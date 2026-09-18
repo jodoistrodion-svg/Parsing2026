@@ -17,6 +17,7 @@ from market.rate_limit import AdaptiveRateLimiter
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 adaptive_rate_limiter = AdaptiveRateLimiter(safety_ms=5)
 _global_session: aiohttp.ClientSession | None = None
+_balance_cache = {"text": "—", "ts": 0.0}
 
 
 class RequestRateLimiter:
@@ -225,7 +226,7 @@ def _extract_account_buy_balance_text(data) -> str | None:
 
 
 async def get_account_buy_balance_text(force: bool = False) -> str:
-    cache = user_balance_cache[0]
+    cache = _balance_cache
     now = time.time()
     if not force and cache["text"] != "—" and now - cache["ts"] < BALANCE_CACHE_TTL:
         return cache["text"]
@@ -252,7 +253,8 @@ async def get_account_buy_balance_text(force: bool = False) -> str:
                     continue
                 parsed = _extract_account_buy_balance_text(data)
                 if parsed:
-                    user_balance_cache[0] = {"text": parsed, "ts": now}
+                    _balance_cache["text"] = parsed
+                    _balance_cache["ts"] = now
                     return parsed
         except Exception:
             continue
