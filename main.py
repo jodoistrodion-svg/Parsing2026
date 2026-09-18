@@ -76,7 +76,7 @@ def _parse_int_list(raw: str) -> set[int]:
 
 OWNER_ID = int((_cfg("OWNER_ID") or "1377985336").strip())
 OWNER_IDS = _parse_int_list(_cfg("OWNER_IDS") or "") or {OWNER_ID}
-ACCESS_MODE = (_cfg("ACCESS_MODE") or "open").strip().lower()
+ACCESS_MODE = (_cfg("ACCESS_MODE") or "closed").strip().lower()
 ACCESS_OPEN = ACCESS_MODE in {"open", "all", "public", "0"}
 
 # ====================== НАСТРОЙКИ ======================
@@ -102,7 +102,7 @@ NON_AUTOBUY_CYCLE_EVERY = int((_cfg("NON_AUTOBUY_CYCLE_EVERY") or "5").strip())
 
 DB_FILE = (_cfg("DB_FILE") or ("/data/bot_data.sqlite" if os.path.isdir("/data") else "bot_data.sqlite")).strip()
 
-LZT_SECRET_WORD = (_cfg("LZT_SECRET_WORD") or "Мазда").strip()
+LZT_SECRET_WORD = _cfg("LZT_SECRET_WORD").strip()
 SEED_URLS_JSON = (_cfg("SEED_URLS_JSON") or "").strip()
 
 URL_PAGE_SIZE = 12
