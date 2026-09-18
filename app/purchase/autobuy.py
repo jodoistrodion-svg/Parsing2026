@@ -560,9 +560,12 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
             return
         user_buy_inflight[user_id].add(key)
         try:
-            return await autobuy_queue_manager.enqueue(
+            admitted = await autobuy_queue_manager.enqueue(
                 user_id, (chat_id, source, item, found_perf), _autobuy_queue_handler
             )
+            if admitted is False:
+                user_buy_inflight[user_id].discard(key)
+            return admitted
         except Exception:
             user_buy_inflight[user_id].discard(key)
             raise
