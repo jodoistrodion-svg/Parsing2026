@@ -188,3 +188,76 @@ def test_runtime_dependency_versions_are_aligned():
     requirements = Path("requirements.txt").read_text(encoding="utf-8")
     assert "aiogram==3.31.0" in requirements
     assert Path("runtime.txt").read_text(encoding="utf-8").strip() == "python-3.12.2"
+
+
+def test_handler_runtime_symbols_are_explicitly_imported():
+    import app.handlers as handlers
+    assert callable(handlers.get_all_sources)
+    assert handlers.URL_PAGE_SIZE > 0
+    assert handlers.USER_PAGE_SIZE > 0
+
+
+def test_autobuy_does_not_retry_when_api_key_is_missing():
+    from app.purchase.autobuy import _autobuy_should_retry_by_info
+    assert _autobuy_should_retry_by_info("LZT_API_KEY не задан") is False
+
+
+def test_queue_full_preserves_existing_autobuy_job():
+    from buyer.queue import UserAutobuyQueueManager
+
+    async def run():
+        manager = UserAutobuyQueueManager(maxsize=1, workers_per_user=1)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def handler(_uid, _payload):
+            started.set()
+            await release.wait()
+
+        assert await manager.enqueue(1, "first", handler) is True
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert await manager.enqueue(1, "second", handler) is True
+        assert await manager.enqueue(1, "third", handler) is False
+
+        queue = manager._queues[1]
+        queued = queue.get_nowait()
+        queue.task_done()
+        assert queued == "second"
+
+        release.set()
+        await manager.shutdown()
+
+    asyncio.run(run())
+
+
+def test_pipeline_does_not_mark_lot_seen_when_autobuy_queue_rejects():
+    from market.pipeline import DiscoveryPipeline
+
+    async def fetch_sources(_uid, *, include_non_autobuy):
+        yield {"url": "https://api.lzt.market/x", "name": "buy", "autobuy": True}, [{"id": 1, "title": "x"}], None
+
+    async def run():
+        seen = []
+        rejected = 0
+
+        async def enqueue(_source, _item, _found):
+            nonlocal rejected
+            rejected += 1
+            return False
+
+        pipeline = DiscoveryPipeline(
+            fetch_sources=fetch_sources,
+            make_key=lambda item: f"id::{item['id']}",
+            is_seen=lambda _key: False,
+            is_attempted=lambda _key: False,
+            mark_seen=lambda key: seen.append(key),
+            enqueue_autobuy=enqueue,
+        )
+        accepted, stats, _errors = await pipeline.run(1, include_non_autobuy=False)
+        return accepted, stats, seen, rejected
+
+    accepted, stats, seen, rejected = asyncio.run(run())
+    assert accepted == []
+    assert stats.queue_rejected == 1
+    assert seen == []
+    assert rejected == 1
