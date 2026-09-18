@@ -8,8 +8,6 @@ import aiosqlite
 from app.config.settings import ACCESS_OPEN, DB_FILE, OWNER_IDS, SEED_URLS_JSON
 from market.normalize import normalize_url, validate_market_url
 
-import aiosqlite
-
 _db: aiosqlite.Connection | None = None
 _db_lock = asyncio.Lock()
 
