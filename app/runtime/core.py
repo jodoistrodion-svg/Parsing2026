@@ -362,8 +362,11 @@ def parse_index_from_button(text: str) -> int | None:
         return None
 
 
-from app.storage.sqlite import *
-from app.services.market_api import *
+from app.storage.sqlite import (
+    db_count_users, db_ensure_user, db_get_role, db_get_urls,
+    db_list_users, db_load_buy_attempted, db_load_seen, db_seed_urls_if_empty,
+)
+from app.services.market_api import fetch_with_retry, get_account_buy_balance_text
 # ====================== STATE ======================
 user_search_active = defaultdict(lambda: False)
 user_hunter_mode = defaultdict(lambda: "off")  # off/classic
