@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
 from domain.decision import DecisionEngine
@@ -38,10 +39,28 @@ class DiscoveryPipeline:
                 await self._mark_seen(key);stats.accepted+=1
                 accepted.append(PipelineItem(item=item,source=source,found_perf=found_perf))
         return accepted,stats,errors
+def _parse_timestamp(value: Any) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    if not text:
+        return 0
+    try:
+        normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
 def _item_sort_key(item:dict[str,Any])->tuple[int,int]:
     published=item.get("published_at") or item.get("created_at") or item.get("date") or item.get("time")
-    try:ts=int(float(published))
-    except Exception:ts=0
+    ts=_parse_timestamp(published)
     try:iid=int(item.get("item_id") or item.get("id") or 0)
-    except Exception:iid=0
+    except (TypeError, ValueError):iid=0
     return ts,iid
