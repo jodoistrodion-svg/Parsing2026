@@ -1,8 +1,21 @@
 from __future__ import annotations
 
-from app.application import *
+import asyncio
+import json
+import random
+import time
+import aiohttp
+from urllib.parse import urlsplit
+
+from app.config.settings import (
+    BALANCE_CACHE_TTL, BUY_MIN_REQUEST_INTERVAL, FETCH_TIMEOUT,
+    LZT_API_KEY, MAX_CONCURRENT_REQUESTS, OTHER_MIN_REQUEST_INTERVAL,
+    RETRY_BASE_DELAY, RETRY_MAX, SEARCH_MIN_REQUEST_INTERVAL,
+)
+from market.rate_limit import AdaptiveRateLimiter
 
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+adaptive_rate_limiter = AdaptiveRateLimiter(safety_ms=5)
 _global_session: aiohttp.ClientSession | None = None
 
 
