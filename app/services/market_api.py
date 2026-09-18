@@ -123,10 +123,11 @@ async def fetch_items_raw(url: str, request_timeout: float | None = None):
 
 async def fetch_with_retry(url: str, max_retries: int = RETRY_MAX, request_timeout: float | None = None):
     attempt = 0
-    retries = max(1, int(max_retries))
+    retries = max(0, int(max_retries))
+    attempts = retries + 1
     delay = RETRY_BASE_DELAY
 
-    while attempt < retries:
+    while attempt < attempts:
         attempt += 1
         try:
             async with semaphore:
@@ -140,7 +141,7 @@ async def fetch_with_retry(url: str, max_retries: int = RETRY_MAX, request_timeo
         if status in (400, 401, 403, 404):
             return [], err
 
-        if attempt >= retries:
+        if attempt >= attempts:
             return [], err
 
         jitter = random.uniform(0, delay * 0.2)
