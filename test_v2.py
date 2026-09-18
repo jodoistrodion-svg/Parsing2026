@@ -346,8 +346,9 @@ def test_all_project_modules_import():
 
     root = Path(__file__).resolve().parent
     failures = []
+    excluded_dirs = {".git", ".venv", "venv", "env", "build", "dist", "__pycache__"}
     for path in root.rglob("*.py"):
-        if "__pycache__" in path.parts or path.name == "test_v2.py":
+        if path.name == "test_v2.py" or any(part in excluded_dirs for part in path.parts):
             continue
         relative = path.relative_to(root).with_suffix("")
         parts = relative.parts
