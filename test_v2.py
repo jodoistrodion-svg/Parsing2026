@@ -81,3 +81,19 @@ def test_bootstrap_imports():
 def test_discovery_bounded_in_flight():
     import market.discovery as discovery
     assert discovery.DISCOVERY_MAX_IN_FLIGHT == 64
+
+
+def test_bootstrap_imports():
+    from app.bootstrap import main
+    assert callable(main)
+
+
+def test_discovery_bounded_in_flight():
+    import market.discovery as discovery
+    assert discovery.DISCOVERY_MAX_IN_FLIGHT == 64
+
+
+def test_settings_module_has_safe_closed_default():
+    from app.config.settings import ACCESS_MODE, ACCESS_OPEN
+    assert ACCESS_MODE == "closed"
+    assert ACCESS_OPEN is False
