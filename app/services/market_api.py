@@ -47,7 +47,7 @@ def _is_buy_endpoint(url: str) -> bool:
         path = (urlsplit(url).path or "").strip().lower()
     except Exception:
         return False
-    return "buy" in path
+    return any(marker in path for marker in ("/buy", "buy/", "/purchase", "purchase/", "confirm-buy", "fast-buy"))
 
 
 def _api_limit_bucket(method: str, url: str) -> tuple[str, float]:
