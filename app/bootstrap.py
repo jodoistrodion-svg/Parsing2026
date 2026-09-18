@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramConflictError, TelegramUnauthorizedError
@@ -10,7 +9,6 @@ import app.application as application
 from app.services.market_api import close_session
 from app.storage.sqlite import db_close, init_db
 
-
 API_TOKEN = application.API_TOKEN
 LZT_BALANCE_ID = application.LZT_BALANCE_ID
 autobuy_queue_manager = application.autobuy_queue_manager
@@ -18,7 +16,6 @@ dp = application.dp
 error_reporter_loop = application.error_reporter_loop
 has_valid_telegram_token = application.has_valid_telegram_token
 logger = application.logger
-
 
 bot: Bot | None = None
 
