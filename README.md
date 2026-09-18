@@ -6,10 +6,11 @@
 
 1. Python 3.12.
 2. `python -m pip install -r requirements.txt`
-3. Скопируй `env.example` в `.env`.
-4. Заполни `API_TOKEN`, `LZT_API_KEY` и `OWNER_ID`.
-5. По умолчанию `ACCESS_MODE=closed`.
-6. `python main.py`
+3. Для разработки и тестов: `python -m pip install -r requirements-dev.txt`
+4. Скопируй `env.example` в `.env`.
+5. Заполни `API_TOKEN` и `OWNER_ID`. `LZT_API_KEY` нужен только для функций, которые обращаются к защищённому API LZT.
+6. По умолчанию `ACCESS_MODE=closed`.
+7. `python main.py`
 
 ## Структура
 
@@ -22,6 +23,9 @@
 `python -m pytest -q`
 
 GitHub Actions выполняет compile + pytest на Python 3.12.
+Для локальной проверки используй:
+`python -m compileall -q .`
+`python -m pytest -q`
 
 ## Безопасность
 
