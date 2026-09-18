@@ -1,6 +1,31 @@
 from __future__ import annotations
 
-from app.application import *
+import asyncio
+import html
+import time
+from aiogram import types
+from aiogram.filters import Command
+
+from app.config.settings import AUTOBUY_LOG_FILE, FETCH_TIMEOUT, HUNTER_INTERVAL_BASE, MAX_URL_NAME_LEN, OWNER_ID, OWNER_IDS, USER_ACTION_FETCH_TIMEOUT
+from app.runtime.core import (
+    START_MSG_1, START_MSG_2, build_urls_picker_kb, dp, get_user_hunter_start_lock,
+    kb_main, kb_request, kb_urls_menu, load_user_data, log_autobuy, normalize_url,
+    parse_index_from_button, parse_user_id_from_button, safe_delete, sanitize_url_name,
+    send_bot_message, send_screen, send_welcome_sticker, show_denied, show_status,
+    show_urls_list_screen, show_users_screen, user_buy_attempted, user_history_reset_pending,
+    user_hunter_mode, user_hunter_tasks, user_last_screen_msg_id, user_modes, user_page_state,
+    user_pending_rename_url, user_pending_url, user_search_active, user_seen_items,
+    user_url_limit, user_urls, validate_market_url, send_compact_10_for_user,
+    send_test_for_single_url,
+)
+from app.purchase.autobuy import _normalize_command_text, hunter_loop_for_user
+from app.storage.sqlite import (
+    db_add_url, db_clear_buy_attempted, db_clear_seen, db_count_users, db_ensure_user,
+    db_get_last_request_ts, db_get_urls, db_is_allowed, db_load_buy_attempted, db_load_seen,
+    db_remove_url, db_set_last_request_ts, db_set_url_autobuy, db_set_url_enabled,
+    db_set_url_name, db_toggle_allowed,
+)
+from app.services.market_api import fetch_with_retry
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):

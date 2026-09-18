@@ -1,6 +1,36 @@
 from __future__ import annotations
 
-from app.application import *
+import asyncio
+import html
+import json
+import random
+import re
+import time
+from urllib.parse import urlsplit
+
+from app.config.settings import (
+    AUTOBUY_BURST_FIRST_WAVE, AUTOBUY_MAX_DURATION_SEC, AUTOBUY_MAX_HTTP_ATTEMPTS,
+    AUTOBUY_PARALLEL_HTTP, AUTOBUY_QUEUE_RETRY_MAX_DELAY, AUTOBUY_QUEUE_RETRY_MIN_DELAY,
+    AUTOBUY_RETRY_ATTEMPTS, AUTOBUY_RETRY_MAX_DELAY, AUTOBUY_RETRY_MIN_DELAY,
+    AUTOBUY_TOTAL_RETRY_WINDOW_SEC, AUTOBUY_URL_LIMIT, FAST_AUTOBUY_TIMEOUT,
+    LZT_API_KEY, LZT_BALANCE_ID, LZT_SECRET_WORD, MAX_ITEMS_PER_SOURCE_SCAN,
+    MAX_NEW_ITEMS_PER_CYCLE, NON_AUTOBUY_CYCLE_EVERY,
+)
+from app.runtime.core import (
+    _format_value, _safe_compact, autobuy_endpoint_cache, autobuy_queue_manager,
+    buy_semaphore, enqueue_hunter_notification, ensure_notify_worker, get_buy_lock,
+    load_user_data, log_autobuy, make_card, make_item_key, reset_no_lots_message,
+    send_bot_message, user_api_errors, user_buy_attempted, user_buy_inflight,
+    user_hunter_interval, user_hunter_mode, user_hunter_tasks, user_notify_queues,
+    user_notify_workers, user_search_active, user_seen_items,
+)
+from app.services.market_api import _api_limit_bucket, _default_api_headers, get_session
+from app.storage.sqlite import db_mark_buy_attempted, db_mark_seen_batch
+from bot.autobuy_strategy import build_buy_urls, prioritize_buy_urls
+from buyer.queue import UserAutobuyQueueManager
+from domain.decision import DecisionEngine
+from market.pipeline import DiscoveryPipeline
+from purchase.idempotency import PurchaseIdempotency
 
 def _autobuy_buy_urls(source_url: str, item_id: int):
     return build_buy_urls(source_url, item_id)
@@ -500,6 +530,17 @@ async def _mark_seen_and_batch(key: str, user_id: int, seen_batch: list[str]):
     user_seen_items[user_id].add(key)
     seen_batch.append(key)
 
+def cleanup_user_hunter_runtime(user_id: int):
+    user_buy_inflight[user_id].clear()
+    task = user_hunter_tasks.get(user_id)
+    if task is asyncio.current_task():
+        user_hunter_tasks.pop(user_id, None)
+    worker = user_notify_workers.get(user_id)
+    if worker is not None and worker.done():
+        user_notify_workers.pop(user_id, None)
+        user_notify_queues.pop(user_id, None)
+
+
 async def hunter_loop_for_user(user_id: int, chat_id: int):
     await load_user_data(user_id)
     user_buy_inflight[user_id].clear()
@@ -585,13 +626,6 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
             await asyncio.sleep(max(await user_hunter_interval(user_id), 0.01))
 
     await autobuy_queue_manager.stop_user(user_id)
-    user_buy_inflight[user_id].clear()
-    task = user_hunter_tasks.get(user_id)
-    if task is asyncio.current_task():
-        user_hunter_tasks.pop(user_id, None)
-    worker = user_notify_workers.get(user_id)
-    if worker is not None and worker.done():
-        user_notify_workers.pop(user_id, None)
-        user_notify_queues.pop(user_id, None)
+    cleanup_user_hunter_runtime(user_id)
 
 __all__ = [name for name in globals() if not name.startswith("__")]
