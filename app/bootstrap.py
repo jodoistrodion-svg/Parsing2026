@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
 from aiogram import Bot
 from aiogram.exceptions import TelegramConflictError, TelegramUnauthorizedError
 
