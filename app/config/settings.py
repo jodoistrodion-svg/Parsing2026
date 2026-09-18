@@ -23,7 +23,7 @@ API_TOKEN = _normalize_telegram_token(_cfg("API_TOKEN", _API_TOKEN))
 LZT_API_KEY = _cfg("LZT_API_KEY", _LZT_API_KEY)
 LZT_BALANCE_ID = int((_cfg("LZT_BALANCE_ID", "20212") or "20212").strip())
 
-OWNER_ID = int((_cfg("OWNER_ID") or "1377985336").strip())
+OWNER_ID = int((_cfg("OWNER_ID") or "0").strip())
 OWNER_IDS = {int(x.strip()) for x in (_cfg("OWNER_IDS") or "").split(",") if x.strip().lstrip("-").isdigit()} or {OWNER_ID}
 ACCESS_MODE = (_cfg("ACCESS_MODE") or "closed").strip().lower()
 ACCESS_OPEN = ACCESS_MODE in {"open", "all", "public", "0"}
