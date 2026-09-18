@@ -10,7 +10,7 @@ class PipelineItem:
     item:dict[str,Any]; source:dict[str,Any]; found_perf:float
 @dataclass(slots=True)
 class PipelineStats:
-    discovered:int=0; duplicates:int=0; filtered:int=0; accepted:int=0; queued:int=0
+    discovered:int=0; duplicates:int=0; filtered:int=0; accepted:int=0; queued:int=0; queue_rejected:int=0
 FetchSources=Callable[...,AsyncIterator[tuple[dict[str,Any],list[dict[str,Any]],str|None]]]
 async def _noop_mark(_:str)->None: return None
 class DiscoveryPipeline:
@@ -35,7 +35,11 @@ class DiscoveryPipeline:
                 found_perf=perf_counter();seen_this_cycle.add(key)
                 # Enqueue first: a failed queue handoff must not permanently hide a lot.
                 if source.get("autobuy",False) and not self._is_attempted(key):
-                    await self._enqueue_autobuy(source,item,found_perf);stats.queued+=1
+                    queued = await self._enqueue_autobuy(source,item,found_perf)
+                    if queued is False:
+                        stats.queue_rejected+=1
+                        continue
+                    stats.queued+=1
                 await self._mark_seen(key);stats.accepted+=1
                 accepted.append(PipelineItem(item=item,source=source,found_perf=found_perf))
         return accepted,stats,errors
