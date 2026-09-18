@@ -301,3 +301,5 @@ async def db_load_buy_attempted(user_id: int):
 
 async def db_clear_buy_attempted(user_id: int):
     await db_execute("DELETE FROM buy_attempted WHERE user_id=?", (user_id,), commit=True)
+
+__all__ = [name for name in globals() if not name.startswith("__")]

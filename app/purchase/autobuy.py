@@ -580,3 +580,5 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
 
     await autobuy_queue_manager.stop_user(user_id)
     user_buy_inflight[user_id].clear()
+
+__all__ = [name for name in globals() if not name.startswith("__")]
