@@ -6,6 +6,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramConflictError, TelegramUnauthorizedError
 
 import app.application as application
+import app.runtime.core as runtime
 from app.services.market_api import close_session
 from app.storage.sqlite import db_close, init_db
 
@@ -27,7 +28,7 @@ async def main():
         raise RuntimeError("Некорректный API_TOKEN: бот не может быть запущен")
 
     bot = Bot(token=API_TOKEN)
-    application.bot = bot
+    runtime.bot = bot
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
