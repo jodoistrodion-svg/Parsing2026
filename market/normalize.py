@@ -1,12 +1,10 @@
 from __future__ import annotations
 from urllib.parse import parse_qsl,urlencode,urlsplit,urlunsplit
 _ALIASES={"genshinlevelmin":"genshin_level_min","genshinlevelmax":"genshin_level_max","brawl_cupmin":"brawl_cup_min","brawl_cupmax":"brawl_cup_max","clash_cupmin":"clash_cup_min","clash_cupmax":"clash_cup_max","orderby":"order_by"}
-def normalize_market_url(url:str)->str:
-    raw=(url or "").strip()
-    if not raw:return raw
-    parts=urlsplit(raw); pairs=parse_qsl(parts.query,keep_blank_values=True)
-    normalized=[(_ALIASES.get(k,k),v) for k,v in pairs]
-    return urlunsplit((parts.scheme,parts.netloc,parts.path,urlencode(normalized,doseq=True),parts.fragment))
+def normalize_market_url(url: str) -> str:
+    """Canonical public normalizer; kept as the legacy compatibility name."""
+    return normalize_url(url)
+
 
 
 VALID_API_HOSTS = {"api.lzt.market", "prod-api.lzt.market", "api.lolz.live"}
@@ -19,7 +17,8 @@ def validate_market_url(url: str):
         return False, "❌ Это не похоже на URL."
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return False, "❌ Это не похоже на URL."
-    if parts.netloc.lower() not in VALID_API_HOSTS:
+    hostname = (parts.hostname or "").lower()
+    if hostname not in VALID_API_HOSTS:
         return False, "❌ Нужна API-ссылка LZT: prod-api.lzt.market / api.lzt.market / api.lolz.live."
     return True, None
 
@@ -30,7 +29,7 @@ def normalize_url(url: str) -> str:
     s = (url or "").strip().replace(" ", "").replace("\t", "").replace("\n", "")
     parts = urlsplit(s)
     scheme = parts.scheme or "https"
-    netloc = (parts.netloc or "").lower()
+    netloc = (parts.hostname or "").lower()
     path = parts.path or ""
     query = parts.query or ""
     alias_map = {"lzt.market": "api.lzt.market", "www.lzt.market": "api.lzt.market", "api.lolz.guru": "api.lzt.market"}
