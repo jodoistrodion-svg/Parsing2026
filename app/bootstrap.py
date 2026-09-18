@@ -13,7 +13,6 @@ API_TOKEN = application.API_TOKEN
 LZT_BALANCE_ID = application.LZT_BALANCE_ID
 autobuy_queue_manager = application.autobuy_queue_manager
 dp = application.dp
-error_reporter_loop = application.error_reporter_loop
 has_valid_telegram_token = application.has_valid_telegram_token
 logger = application.logger
 ERROR_REPORT_INTERVAL = application.ERROR_REPORT_INTERVAL
