@@ -580,5 +580,12 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
 
     await autobuy_queue_manager.stop_user(user_id)
     user_buy_inflight[user_id].clear()
+    task = user_hunter_tasks.get(user_id)
+    if task is asyncio.current_task():
+        user_hunter_tasks.pop(user_id, None)
+    worker = user_notify_workers.get(user_id)
+    if worker is not None and worker.done():
+        user_notify_workers.pop(user_id, None)
+        user_notify_queues.pop(user_id, None)
 
 __all__ = [name for name in globals() if not name.startswith("__")]
