@@ -6,7 +6,7 @@
 
 1. Python 3.12.
 2. `python -m pip install -r requirements.txt`
-3. Скопируй `.env.example` в `.env`.
+3. Скопируй `env.example` в `.env`.
 4. Заполни `API_TOKEN`, `LZT_API_KEY` и `OWNER_ID`.
 5. По умолчанию `ACCESS_MODE=closed`.
 6. `python main.py`

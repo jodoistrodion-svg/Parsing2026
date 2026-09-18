@@ -49,3 +49,8 @@ def test_item_sort_key_accepts_iso8601():
     new = _item_sort_key({"id": 2, "published_at": "2026-09-18T10:01:00+00:00"})
     assert old[0] > 0
     assert new[0] > old[0]
+
+
+def test_main_entrypoint_imports():
+    import main
+    assert callable(main.main)
