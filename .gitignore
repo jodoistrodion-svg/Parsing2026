@@ -1,0 +1,33 @@
+# Secrets
+.env
+.env.*
+!.env.example
+local_settings/
+lzt_api_key.txt
+telegram_token.txt
+settings.json
+
+# Runtime
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.log
+/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
