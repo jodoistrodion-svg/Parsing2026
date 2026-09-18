@@ -97,7 +97,7 @@ def test_no_application_import_dependencies():
         if "__pycache__" in path.parts:
             continue
         text = path.read_text(encoding="utf-8")
-        if "from app.application import" in text and path.name != "application.py":
+        if "from app.application import" in text and path.name not in {"application.py", "test_v2.py"}:
             offenders.append(str(path.relative_to(root)))
     assert offenders == []
 
@@ -107,7 +107,7 @@ def test_application_is_thin_composition_root():
     text = Path("app/application.py").read_text(encoding="utf-8")
     assert len(text.splitlines()) < 50
     assert "app.runtime.core" in text
-    assert "app.purchase.autobuy" in text
+    assert "from app.purchase import autobuy" in text
     assert "app import handlers" in text
 
 
