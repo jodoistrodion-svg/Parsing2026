@@ -1,11 +1,8 @@
-"""Process entry point for Parsing2026.
-
-Keep startup wiring here; application logic belongs to app.application.
-"""
+"""Process entry point for Parsing2026."""
 
 import asyncio
 
-from app.application import main
+from app.bootstrap import main
 
 
 if __name__ == "__main__":
