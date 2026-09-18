@@ -301,3 +301,21 @@ def test_purchase_claim_cannot_be_released_by_another_task():
         return await manager.release(key)
 
     asyncio.run(run())
+
+
+def test_env_example_placeholder_does_not_activate_lzt_api():
+    import os
+    import importlib
+    import app.config.settings as settings
+
+    original = os.environ.get("LZT_API_KEY")
+    os.environ["LZT_API_KEY"] = "replace-with-lzt-api-key"
+    try:
+        reloaded = importlib.reload(settings)
+        assert reloaded.LZT_API_KEY == ""
+    finally:
+        if original is None:
+            os.environ.pop("LZT_API_KEY", None)
+        else:
+            os.environ["LZT_API_KEY"] = original
+        importlib.reload(settings)
