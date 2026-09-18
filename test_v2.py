@@ -71,3 +71,13 @@ def test_retry_count_is_retries_plus_initial_attempt():
 def test_main_entrypoint_imports():
     import main
     assert callable(main.main)
+
+
+def test_bootstrap_imports():
+    from app.bootstrap import main
+    assert callable(main)
+
+
+def test_discovery_bounded_in_flight():
+    import market.discovery as discovery
+    assert discovery.DISCOVERY_MAX_IN_FLIGHT == 64
