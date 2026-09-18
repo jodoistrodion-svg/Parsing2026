@@ -13,7 +13,6 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.exceptions import (
     TelegramBadRequest,
-    TelegramConflictError,
     TelegramForbiddenError,
     TelegramRetryAfter,
 )
@@ -35,6 +34,7 @@ from app.config.settings import (
     MAX_URLS_PER_USER_DEFAULT,
     MAX_URLS_PER_USER_LIMITED,
     MAX_URL_NAME_LEN,
+    OWNER_IDS,
     SHORT_CARD_MAX,
     TG_SEND_DELAY,
     URL_PAGE_SIZE,
