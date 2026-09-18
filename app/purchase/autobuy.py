@@ -30,6 +30,7 @@ from app.storage.sqlite import db_mark_buy_attempted, db_mark_seen_batch
 from bot.autobuy_strategy import build_buy_urls, prioritize_buy_urls
 from domain.decision import DecisionEngine
 from market.pipeline import DiscoveryPipeline
+from metrics.events import METRICS
 
 def _autobuy_buy_urls(source_url: str, item_id: int):
     return build_buy_urls(source_url, item_id)
