@@ -15,8 +15,6 @@ autobuy_queue_manager = application.autobuy_queue_manager
 dp = application.dp
 has_valid_telegram_token = application.has_valid_telegram_token
 logger = application.logger
-ERROR_REPORT_INTERVAL = application.ERROR_REPORT_INTERVAL
-
 
 async def error_reporter_loop():
     while True:
@@ -41,7 +39,6 @@ async def main():
         logger.warning("WEBHOOK_DELETE_ERR err=%s", application._safe_compact(str(e), 180))
 
     await init_db()
-    error_task = asyncio.create_task(error_reporter_loop())
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     except TelegramUnauthorizedError:
@@ -51,8 +48,6 @@ async def main():
         logger.exception("POLLING_CONFLICT another polling/webhook instance is running")
         raise
     finally:
-        error_task.cancel()
-        await asyncio.gather(error_task, return_exceptions=True)
         await autobuy_queue_manager.shutdown()
         await close_session()
         await db_close()
