@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import signal
 
 from aiogram import Bot
@@ -101,6 +100,10 @@ async def main() -> None:
     bot = Bot(token=API_TOKEN)
     runtime.bot = bot
 
+    polling_task: asyncio.Task | None = None
+    stop_waiter: asyncio.Task | None = None
+    maintenance_task: asyncio.Task | None = None
+
     try:
         await init_db()
         await health.start()
@@ -135,8 +138,9 @@ async def main() -> None:
             except Exception:
                 logger.exception("STOP_POLLING_FAILED")
 
-        await polling_task
-        if maintenance_task.done() and not maintenance_task.cancelled():
+        if polling_task is not None:
+            await polling_task
+        if maintenance_task is not None and maintenance_task.done() and not maintenance_task.cancelled():
             error = maintenance_task.exception()
             if error is not None:
                 logger.error("DATABASE_MAINTENANCE_STOPPED error=%s", error)
@@ -157,6 +161,9 @@ async def main() -> None:
         raise
     finally:
         stop_event.set()
+        if stop_waiter is not None and not stop_waiter.done():
+            stop_waiter.cancel()
+            await asyncio.gather(stop_waiter, return_exceptions=True)
         await health.stop()
         await supervisor.shutdown()
         await application.autobuy_queue_manager.shutdown(drain=False)

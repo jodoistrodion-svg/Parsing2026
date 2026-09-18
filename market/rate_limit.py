@@ -47,8 +47,7 @@ class AdaptiveRateLimiter:
             delay = max(waits, default=0.0)
             if delay <= 0:
                 return
-            async with self._lock(bucket):
-                await asyncio.sleep(delay)
+            await asyncio.sleep(delay)
 
     async def note_retry_after(self, bucket: str, seconds: float) -> None:
         if seconds <= 0:
