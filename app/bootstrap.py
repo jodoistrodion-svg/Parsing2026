@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
-
 from aiogram import Bot
 from aiogram.exceptions import TelegramConflictError, TelegramUnauthorizedError
 
 import app.application as application
 import app.runtime.core as runtime
+from app.config.settings import validate_runtime_config
 from app.services.market_api import close_session
 from app.storage.sqlite import db_close, init_db
 
@@ -24,6 +23,7 @@ async def main():
     global bot
     logger.info("BOT_START mode=classic balance_id=%s", LZT_BALANCE_ID)
 
+    validate_runtime_config()
     if not has_valid_telegram_token(API_TOKEN):
         raise RuntimeError("Некорректный API_TOKEN: бот не может быть запущен")
 
@@ -35,8 +35,8 @@ async def main():
     except Exception as e:
         logger.warning("WEBHOOK_DELETE_ERR err=%s", application._safe_compact(str(e), 180))
 
-    await init_db()
     try:
+        await init_db()
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     except TelegramUnauthorizedError:
         logger.exception("POLLING_UNAUTHORIZED invalid telegram token")

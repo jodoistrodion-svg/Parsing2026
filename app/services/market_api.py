@@ -8,7 +8,7 @@ import aiohttp
 from urllib.parse import urlsplit
 
 from app.config.settings import (
-    BALANCE_CACHE_TTL, BUY_MIN_REQUEST_INTERVAL, FETCH_TIMEOUT,
+    BALANCE_CACHE_TTL, BUY_MIN_REQUEST_INTERVAL, FETCH_TIMEOUT, LZT_BALANCE_ID,
     LZT_API_KEY, MAX_CONCURRENT_REQUESTS, OTHER_MIN_REQUEST_INTERVAL,
     RETRY_BASE_DELAY, RETRY_MAX, SEARCH_MIN_REQUEST_INTERVAL,
 )
@@ -17,6 +17,7 @@ from market.rate_limit import AdaptiveRateLimiter
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 adaptive_rate_limiter = AdaptiveRateLimiter(safety_ms=5)
 _global_session: aiohttp.ClientSession | None = None
+_balance_cache = {"text": "—", "ts": 0.0}
 
 
 class RequestRateLimiter:
@@ -176,6 +177,11 @@ def _format_money(v) -> str:
             return str(v)
 
 
+def invalidate_balance_cache() -> None:
+    _balance_cache["text"] = "—"
+    _balance_cache["ts"] = 0.0
+
+
 def _extract_account_buy_balance_text(data) -> str | None:
     candidates = []
 
@@ -225,7 +231,7 @@ def _extract_account_buy_balance_text(data) -> str | None:
 
 
 async def get_account_buy_balance_text(force: bool = False) -> str:
-    cache = user_balance_cache[0]
+    cache = _balance_cache
     now = time.time()
     if not force and cache["text"] != "—" and now - cache["ts"] < BALANCE_CACHE_TTL:
         return cache["text"]
@@ -252,7 +258,8 @@ async def get_account_buy_balance_text(force: bool = False) -> str:
                     continue
                 parsed = _extract_account_buy_balance_text(data)
                 if parsed:
-                    user_balance_cache[0] = {"text": parsed, "ts": now}
+                    _balance_cache["text"] = parsed
+                    _balance_cache["ts"] = now
                     return parsed
         except Exception:
             continue

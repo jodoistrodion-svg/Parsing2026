@@ -188,3 +188,186 @@ def test_runtime_dependency_versions_are_aligned():
     requirements = Path("requirements.txt").read_text(encoding="utf-8")
     assert "aiogram==3.31.0" in requirements
     assert Path("runtime.txt").read_text(encoding="utf-8").strip() == "python-3.12.2"
+
+
+def test_handler_runtime_symbols_are_explicitly_imported():
+    import app.handlers as handlers
+    assert callable(handlers.get_all_sources)
+    assert handlers.URL_PAGE_SIZE > 0
+    assert handlers.USER_PAGE_SIZE > 0
+
+
+def test_autobuy_does_not_retry_when_api_key_is_missing():
+    from app.purchase.autobuy import _autobuy_should_retry_by_info
+    assert _autobuy_should_retry_by_info("LZT_API_KEY не задан") is False
+
+
+def test_queue_full_preserves_existing_autobuy_job():
+    from buyer.queue import UserAutobuyQueueManager
+
+    async def run():
+        manager = UserAutobuyQueueManager(maxsize=1, workers_per_user=1)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def handler(_uid, _payload):
+            started.set()
+            await release.wait()
+
+        assert await manager.enqueue(1, "first", handler) is True
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert await manager.enqueue(1, "second", handler) is True
+        assert await manager.enqueue(1, "third", handler) is False
+
+        queue = manager._queues[1]
+        queued = queue.get_nowait()
+        queue.task_done()
+        assert queued == "second"
+
+        release.set()
+        await manager.shutdown()
+
+    asyncio.run(run())
+
+
+def test_pipeline_does_not_mark_lot_seen_when_autobuy_queue_rejects():
+    from market.pipeline import DiscoveryPipeline
+
+    async def fetch_sources(_uid, *, include_non_autobuy):
+        yield {"url": "https://api.lzt.market/x", "name": "buy", "autobuy": True}, [{"id": 1, "title": "x"}], None
+
+    async def run():
+        seen = []
+        rejected = 0
+
+        async def enqueue(_source, _item, _found):
+            nonlocal rejected
+            rejected += 1
+            return False
+
+        pipeline = DiscoveryPipeline(
+            fetch_sources=fetch_sources,
+            make_key=lambda item: f"id::{item['id']}",
+            is_seen=lambda _key: False,
+            is_attempted=lambda _key: False,
+            mark_seen=lambda key: seen.append(key),
+            enqueue_autobuy=enqueue,
+        )
+        accepted, stats, _errors = await pipeline.run(1, include_non_autobuy=False)
+        return accepted, stats, seen, rejected
+
+    accepted, stats, seen, rejected = asyncio.run(run())
+    assert accepted == []
+    assert stats.queue_rejected == 1
+    assert seen == []
+    assert rejected == 1
+
+
+def test_normalize_market_url_does_not_rewrite_query_values():
+    from market.normalize import normalize_url
+
+    got = normalize_url(
+        "https://api.lzt.market/mihoyo?note=orderby%3Dweird&orderby=pdate_to_down"
+    )
+    assert "note=orderby%3Dweird" in got
+    assert "order_by=pdate_to_down" in got
+    assert "orderby%3Dweird" in got
+
+
+def test_normalize_strips_credentials_and_normalizes_alias_host():
+    from market.normalize import normalize_url, validate_market_url
+
+    raw = "https://user:pass@www.lzt.market:443/mihoyo"
+    ok, error = validate_market_url(raw)
+    assert ok is True and error is None
+    got = normalize_url(raw)
+    assert got.startswith("https://api.lzt.market/mihoyo?")
+    assert "user%3Apass" not in got
+    assert "@" not in got
+
+
+def test_purchase_claim_cannot_be_released_by_another_task():
+    from purchase.idempotency import PurchaseIdempotency
+
+    async def run():
+        manager = PurchaseIdempotency()
+        assert await manager.claim("id::1") is True
+        released = await asyncio.create_task(_release_from_other_task(manager, "id::1"))
+        assert released is False
+        assert manager.claimed("id::1") is True
+        assert await manager.release("id::1") is True
+
+    async def _release_from_other_task(manager, key):
+        return await manager.release(key)
+
+    asyncio.run(run())
+
+
+def test_env_example_placeholder_does_not_activate_lzt_api():
+    import os
+    import importlib
+    import app.config.settings as settings
+
+    original = os.environ.get("LZT_API_KEY")
+    os.environ["LZT_API_KEY"] = "replace-with-lzt-api-key"
+    try:
+        reloaded = importlib.reload(settings)
+        assert reloaded.LZT_API_KEY == ""
+    finally:
+        if original is None:
+            os.environ.pop("LZT_API_KEY", None)
+        else:
+            os.environ["LZT_API_KEY"] = original
+        importlib.reload(settings)
+
+
+def test_closed_access_requires_owner_configuration():
+    import app.config.settings as settings
+
+    original_open = settings.ACCESS_OPEN
+    original_owners = settings.OWNER_IDS
+    try:
+        settings.ACCESS_OPEN = False
+        settings.OWNER_IDS = set()
+        try:
+            settings.validate_runtime_config()
+        except RuntimeError as exc:
+            assert "OWNER_ID/OWNER_IDS" in str(exc)
+        else:
+            raise AssertionError("closed access without owner must fail validation")
+    finally:
+        settings.ACCESS_OPEN = original_open
+        settings.OWNER_IDS = original_owners
+
+
+def test_all_project_modules_import():
+    import importlib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent
+    failures = []
+    for path in root.rglob("*.py"):
+        if "__pycache__" in path.parts or path.name == "test_v2.py":
+            continue
+        relative = path.relative_to(root).with_suffix("")
+        parts = relative.parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if not parts:
+            continue
+        module_name = ".".join(parts)
+        try:
+            importlib.import_module(module_name)
+        except Exception as exc:
+            failures.append(f"{module_name}: {type(exc).__name__}: {exc}")
+    assert failures == []
+
+
+def test_autobuy_response_classifier_requires_explicit_success():
+    from app.purchase.autobuy import _autobuy_classify_response
+
+    assert _autobuy_classify_response(200, '{"success": true}')[0] == "success"
+    assert _autobuy_classify_response(200, '{"status": "ok"}')[0] == "success"
+    assert _autobuy_classify_response(200, "secret answer required")[0] == "secret"
+    assert _autobuy_classify_response(200, "cookie accepted")[0] == "retry"
+    assert _autobuy_classify_response(200, "")[0] == "success"

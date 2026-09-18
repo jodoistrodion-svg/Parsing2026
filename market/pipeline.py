@@ -10,12 +10,12 @@ class PipelineItem:
     item:dict[str,Any]; source:dict[str,Any]; found_perf:float
 @dataclass(slots=True)
 class PipelineStats:
-    discovered:int=0; duplicates:int=0; filtered:int=0; accepted:int=0; queued:int=0
+    discovered:int=0; duplicates:int=0; filtered:int=0; accepted:int=0; queued:int=0; queue_rejected:int=0
 FetchSources=Callable[...,AsyncIterator[tuple[dict[str,Any],list[dict[str,Any]],str|None]]]
 async def _noop_mark(_:str)->None: return None
 class DiscoveryPipeline:
     """Hot-path orchestration: fetch -> dedup/decision -> enqueue -> seen."""
-    def __init__(self,*,fetch_sources:FetchSources,make_key:Callable[[dict[str,Any]],str],is_seen:Callable[[str],bool],is_attempted:Callable[[str],bool],mark_seen:Callable[[str],Awaitable[None]],enqueue_autobuy:Callable[[dict[str,Any],dict[str,Any],float],Awaitable[None]],decision:DecisionEngine|None=None,max_items_per_source:int=200,max_new_items_per_cycle:int=1000):
+    def __init__(self,*,fetch_sources:FetchSources,make_key:Callable[[dict[str,Any]],str],is_seen:Callable[[str],bool],is_attempted:Callable[[str],bool],mark_seen:Callable[[str],Awaitable[None]],enqueue_autobuy:Callable[[dict[str,Any],dict[str,Any],float],Awaitable[bool | None]],decision:DecisionEngine|None=None,max_items_per_source:int=200,max_new_items_per_cycle:int=1000):
         self._fetch_sources=fetch_sources;self._make_key=make_key;self._is_seen=is_seen;self._is_attempted=is_attempted;self._mark_seen=mark_seen;self._enqueue_autobuy=enqueue_autobuy;self._decision=decision or DecisionEngine();self._max_items_per_source=max(0,int(max_items_per_source));self._max_new_items_per_cycle=max(0,int(max_new_items_per_cycle))
     async def run(self,user_id:int,*,include_non_autobuy:bool):
         stats=PipelineStats();accepted=[];errors=[];seen_this_cycle=set()
@@ -35,7 +35,11 @@ class DiscoveryPipeline:
                 found_perf=perf_counter();seen_this_cycle.add(key)
                 # Enqueue first: a failed queue handoff must not permanently hide a lot.
                 if source.get("autobuy",False) and not self._is_attempted(key):
-                    await self._enqueue_autobuy(source,item,found_perf);stats.queued+=1
+                    queued = await self._enqueue_autobuy(source,item,found_perf)
+                    if queued is False:
+                        stats.queue_rejected+=1
+                        continue
+                    stats.queued+=1
                 await self._mark_seen(key);stats.accepted+=1
                 accepted.append(PipelineItem(item=item,source=source,found_perf=found_perf))
         return accepted,stats,errors

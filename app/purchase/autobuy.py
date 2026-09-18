@@ -17,20 +17,18 @@ from app.config.settings import (
     MAX_NEW_ITEMS_PER_CYCLE, NON_AUTOBUY_CYCLE_EVERY,
 )
 from app.runtime.core import (
-    _format_value, _safe_compact, autobuy_endpoint_cache, autobuy_queue_manager,
+    bot, _format_value, _safe_compact, autobuy_endpoint_cache, autobuy_queue_manager,
     buy_semaphore, enqueue_hunter_notification, ensure_notify_worker, get_buy_lock,
     load_user_data, log_autobuy, make_card, make_item_key, reset_no_lots_message,
-    send_bot_message, user_api_errors, user_buy_attempted, user_buy_inflight,
+    send_bot_message, user_api_errors, user_buy_attempted, user_buy_inflight, purchase_idempotency,
     user_hunter_interval, user_hunter_mode, user_hunter_tasks, user_notify_queues,
-    user_notify_workers, user_search_active, user_seen_items,
+    user_notify_workers, user_search_active, user_seen_items, iter_sources_results_split,
 )
-from app.services.market_api import _api_limit_bucket, _default_api_headers, get_session
+from app.services.market_api import _api_limit_bucket, _default_api_headers, get_session, request_rate_limiter
 from app.storage.sqlite import db_mark_buy_attempted, db_mark_seen_batch
 from bot.autobuy_strategy import build_buy_urls, prioritize_buy_urls
-from buyer.queue import UserAutobuyQueueManager
 from domain.decision import DecisionEngine
 from market.pipeline import DiscoveryPipeline
-from purchase.idempotency import PurchaseIdempotency
 
 def _autobuy_buy_urls(source_url: str, item_id: int):
     return build_buy_urls(source_url, item_id)
@@ -87,8 +85,10 @@ def _autobuy_classify_response(status: int, text: str):
         success_flag = data.get("success")
         if status_flag in {"error", "failed", "fail"} or success_flag is False:
             return "retry", raw[:220], False
+        if status_flag in {"success", "ok", "purchased", "complete", "completed", "done"} or success_flag is True:
+            return "success", raw[:220], False
 
-    success_markers = ("success", "ok", "purchased", "purchase complete", "already bought", "уже куп")
+    success_markers = ("success", "purchased", "purchase complete", "already bought", "уже куп")
     terminal_error_markers = (
         "insufficient", "not enough", "недостаточно", "уже продан", "already sold",
         "already purchased", "already bought", "цена изменилась", "нельзя купить",
@@ -101,6 +101,10 @@ def _autobuy_classify_response(status: int, text: str):
         "api key", "scope", "token", "unauthorized", "authorization", "bearer",
         "неверный ключ", "доступ запрещен", "доступ запрещён",
     )
+    secret_markers = (
+        "secret", "secret answer", "secret_word", "секретный ответ",
+        "требуется секрет",
+    )
 
     if status in (404, 405):
         return "retry", raw[:220], False
@@ -109,9 +113,13 @@ def _autobuy_classify_response(status: int, text: str):
             return "auth", raw[:220], False
         if any(marker in joined for marker in queue_markers):
             return "queue", raw[:220], False
+        if any(marker in joined for marker in secret_markers):
+            return "secret", raw[:220], False
         if any(marker in joined for marker in terminal_error_markers):
             return "terminal", raw[:220], False
-        return "success", raw[:220], False
+        if not raw.strip():
+            return "success", raw[:220], False
+        return "retry", raw[:220], False
     if status == 401:
         return "auth", raw[:220], False
     if status == 415:
@@ -121,6 +129,8 @@ def _autobuy_classify_response(status: int, text: str):
 
     if any(marker in joined for marker in queue_markers):
         return "queue", raw[:220], False
+    if any(marker in joined for marker in secret_markers):
+        return "secret", raw[:220], False
     if any(marker in joined for marker in success_markers):
         return "success", raw[:220], False
     if any(marker in joined for marker in terminal_error_markers):
@@ -151,6 +161,7 @@ def _autobuy_retry_delay(is_queue: bool) -> float:
 def _autobuy_should_retry_by_info(info: str) -> bool:
     low = (info or "").lower()
     if any(x in low for x in (
+        "lzt_api_key не задан",
         "ошибка авторизации", "authorization", "unauthorized", "forbidden", "access denied",
         "недостаточно", "insufficient", "already sold", "already bought", "already purchased",
         "уже продан", "нельзя купить", "ручная проверка", "secret",
@@ -558,12 +569,15 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
     async def enqueue_autobuy(source: dict, item: dict, found_perf: float):
         key = make_item_key(item)
         if key in user_buy_attempted[user_id] or key in user_buy_inflight[user_id]:
-            return
+            return False
         user_buy_inflight[user_id].add(key)
         try:
-            await autobuy_queue_manager.enqueue(
+            admitted = await autobuy_queue_manager.enqueue(
                 user_id, (chat_id, source, item, found_perf), _autobuy_queue_handler
             )
+            if admitted is False:
+                user_buy_inflight[user_id].discard(key)
+            return admitted
         except Exception:
             user_buy_inflight[user_id].discard(key)
             raise

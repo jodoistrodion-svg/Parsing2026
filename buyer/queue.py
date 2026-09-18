@@ -18,15 +18,14 @@ class UserAutobuyQueueManager:
             workers=[t for t in self._workers.get(user_id,[]) if not t.done()]; self._workers[user_id]=workers
             for _ in range(max(0,self._workers_per_user-len(workers))): workers.append(asyncio.create_task(self._worker_loop(user_id,handler)))
     async def enqueue(self,user_id,payload,handler):
-        await self.ensure_worker(user_id,handler); q=self._get_queue(user_id)
-        if q.full():
-            dropped=0
-            while q.full() and not q.empty() and dropped<200:
-                try:q.get_nowait(); q.task_done(); dropped+=1
-                except Exception:break
-            if dropped:logger.warning("AUTOBUY_QUEUE_DROP user_id=%s dropped=%s",user_id,dropped)
-        try:q.put_nowait(payload)
-        except asyncio.QueueFull:logger.warning("AUTOBUY_QUEUE_FULL user_id=%s",user_id)
+        await self.ensure_worker(user_id,handler)
+        q=self._get_queue(user_id)
+        try:
+            q.put_nowait(payload)
+            return True
+        except asyncio.QueueFull:
+            logger.error("AUTOBUY_QUEUE_FULL user_id=%s maxsize=%s",user_id,self._maxsize)
+            return False
     async def stop_user(self,user_id):
         async with self._lock: workers=self._workers.pop(user_id,[])
         for task in workers: task.cancel()

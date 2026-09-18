@@ -6,16 +6,26 @@ import time
 from aiogram import types
 from aiogram.filters import Command
 
-from app.config.settings import AUTOBUY_LOG_FILE, FETCH_TIMEOUT, HUNTER_INTERVAL_BASE, MAX_URL_NAME_LEN, OWNER_ID, OWNER_IDS, USER_ACTION_FETCH_TIMEOUT
+from app.config.settings import (
+    AUTOBUY_LOG_FILE,
+    FETCH_TIMEOUT,
+    HUNTER_INTERVAL_BASE,
+    MAX_URL_NAME_LEN,
+    OWNER_ID,
+    OWNER_IDS,
+    URL_PAGE_SIZE,
+    USER_ACTION_FETCH_TIMEOUT,
+    USER_PAGE_SIZE,
+)
 from app.runtime.core import (
     START_MSG_1, START_MSG_2, build_urls_picker_kb, dp, get_user_hunter_start_lock,
-    kb_main, kb_request, kb_urls_menu, load_user_data, log_autobuy, normalize_url,
+    kb_main, kb_request, kb_urls_menu, load_user_data, log_autobuy,
     parse_index_from_button, parse_user_id_from_button, safe_delete, sanitize_url_name,
-    send_bot_message, send_screen, send_welcome_sticker, show_denied, show_status,
+    send_bot_message, send_screen, send_welcome_sticker, show_denied, show_status, _safe_compact,
     show_urls_list_screen, show_users_screen, user_buy_attempted, user_history_reset_pending,
     user_hunter_mode, user_hunter_tasks, user_last_screen_msg_id, user_modes, user_page_state,
     user_pending_rename_url, user_pending_url, user_search_active, user_seen_items,
-    user_url_limit, user_urls, validate_market_url, send_compact_10_for_user,
+    user_url_limit, user_urls, get_all_sources, send_compact_10_for_user,
     send_test_for_single_url,
 )
 from app.purchase.autobuy import _normalize_command_text, hunter_loop_for_user
@@ -25,7 +35,8 @@ from app.storage.sqlite import (
     db_remove_url, db_set_last_request_ts, db_set_url_autobuy, db_set_url_enabled,
     db_set_url_name, db_toggle_allowed,
 )
-from app.services.market_api import fetch_with_retry
+from app.services.market_api import fetch_with_retry, invalidate_balance_cache
+from market.normalize import normalize_url, validate_market_url
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
@@ -51,7 +62,7 @@ async def health_cmd(message: types.Message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     await load_user_data(user_id)
-    user_balance_cache[0] = {"text": "—", "ts": 0}
+    invalidate_balance_cache()
     await show_status(user_id, chat_id)
     await safe_delete(message)
 
@@ -447,6 +458,7 @@ async def buttons_handler(message: types.Message):
             await safe_delete(message)
 
     except Exception as e:
+        log_autobuy(f"HANDLER_ERR user_id={user_id} err='{_safe_compact(str(e),500)}'")
         try:
             await send_screen(
                 chat_id,
