@@ -29,6 +29,6 @@ GitHub Actions выполняет compile + pytest на Python 3.12.
 
 ## Безопасность
 
-Секреты не хранятся в Git. Используй только placeholders в `.env.example`.
+Секреты не хранятся в Git. Используй только placeholders в `env.example`.
 
 В старом `env.example` были опубликованы реальные Telegram/LZT credentials. Удаление значения из текущей ветки не отзывает и не удаляет его из истории Git. Эти credentials необходимо отозвать и перевыпустить у провайдеров.
