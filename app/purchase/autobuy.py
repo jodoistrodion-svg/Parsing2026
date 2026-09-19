@@ -14,7 +14,7 @@ from app.config.settings import (
     AUTOBUY_PARALLEL_HTTP, AUTOBUY_QUEUE_RETRY_MAX_DELAY, AUTOBUY_QUEUE_RETRY_MIN_DELAY,
     AUTOBUY_RETRY_ATTEMPTS, AUTOBUY_RETRY_MAX_DELAY, AUTOBUY_RETRY_MIN_DELAY,
     AUTOBUY_TOTAL_RETRY_WINDOW_SEC, AUTOBUY_URL_LIMIT, FAST_AUTOBUY_TIMEOUT,
-    LZT_BALANCE_ID, LZT_SECRET_WORD, MAX_ITEMS_PER_SOURCE_SCAN,
+    LZT_API_KEY as _LEGACY_LZT_API_KEY, LZT_BALANCE_ID, LZT_SECRET_WORD, MAX_ITEMS_PER_SOURCE_SCAN,
     MAX_NEW_ITEMS_PER_CYCLE, NON_AUTOBUY_CYCLE_EVERY,
 )
 from app.runtime.core import (
@@ -31,6 +31,9 @@ from bot.autobuy_strategy import build_buy_urls, prioritize_buy_urls
 from domain.decision import DecisionEngine
 from market.pipeline import DiscoveryPipeline
 from metrics.events import METRICS
+
+# Backward-compatible test/config surface; live requests use per-user credentials.
+LZT_API_KEY = _LEGACY_LZT_API_KEY
 
 def _autobuy_buy_urls(source_url: str, item_id: int):
     return build_buy_urls(source_url, item_id)
