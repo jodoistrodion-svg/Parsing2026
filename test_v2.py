@@ -506,7 +506,7 @@ def test_storage_schema_version_and_retention_cleanup(tmp_path):
         storage._db = None
         try:
             await storage.init_db()
-            assert await storage.db_get_schema_version() == 4
+            assert await storage.db_get_schema_version() == 5
             now = int(time.time())
             await storage.db_execute(
                 "INSERT OR REPLACE INTO seen(user_id, item_key, seen_at) VALUES (?, ?, ?)",
