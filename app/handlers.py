@@ -283,6 +283,7 @@ async def buttons_handler(message: types.Message):
                     task.cancel()
                 user_hunter_tasks.pop(user_id, None)
                 await autobuy_queue_manager.stop_user(user_id, drain=False)
+                user_buy_inflight[user_id].clear()
                 await send_screen(chat_id, user_id, "✅ LZT подключение удалено. Охотник остановлен.", reply_markup=kb_main(user_id))
                 user_modes[user_id] = None
                 return await safe_delete(message)
@@ -301,6 +302,7 @@ async def buttons_handler(message: types.Message):
                 await send_screen(chat_id, user_id, f"❌ <b>Token не принят</b>\n{html.escape(label)}\n\nНичего не сохранено.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
                 return await safe_delete(message)
             await autobuy_queue_manager.stop_user(user_id, drain=False)
+            user_buy_inflight[user_id].clear()
             user_search_active[user_id] = False
             user_hunter_mode[user_id] = "off"
             task = user_hunter_tasks.get(user_id)
@@ -406,6 +408,7 @@ async def buttons_handler(message: types.Message):
                     target_task.cancel()
                 user_hunter_tasks.pop(target_uid, None)
                 await autobuy_queue_manager.stop_user(target_uid, drain=False)
+                user_buy_inflight[target_uid].clear()
                 log_autobuy(f"LICENSE_REVOKE user_id={target_uid} by_admin={user_id}")
 
                 try:
