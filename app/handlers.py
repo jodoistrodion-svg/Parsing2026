@@ -305,7 +305,7 @@ async def buttons_handler(message: types.Message):
             await send_screen(chat_id, user_id, f"✅ <b>LZT подключён</b>\n{html.escape(label)}\n\nToken сохранён за твоим Telegram ID.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
             return await safe_delete(message)
     
-    if mode == "license_admin" and user_id in OWNER_IDS:
+        if mode == "license_admin" and user_id in OWNER_IDS:
             if text == "⬅️ Назад":
                 user_modes[user_id] = None
                 await send_screen(chat_id, user_id, "🧭 <b>Главное меню</b>", reply_markup=kb_main(user_id), parse_mode="HTML")
