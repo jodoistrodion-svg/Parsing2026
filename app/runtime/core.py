@@ -135,6 +135,7 @@ def kb_main(user_id: int) -> ReplyKeyboardMarkup:
         [kb_button("🚀 Старт охотника", "success"), kb_button("🛑 Стоп охотника")],
         [kb_button("✨ Проверка лотов", "primary"), kb_button("📊 Статус")],
         [kb_button("📚 Мои URL", "primary"), kb_button("♻️ Сбросить историю")],
+        [kb_button("🔑 LZT API", "primary")],
         [kb_button("ℹ️ Инфо")],
     ]
     if user_id in OWNER_IDS:
@@ -622,7 +623,7 @@ async def show_status(user_id: int, chat_id: int):
     active_sources = sum(1 for s in sources if s.get("enabled", True))
     autobuy_sources = sum(1 for s in sources if s.get("autobuy", False))
     hunter_state = "🟢 Запущен" if user_hunter_mode.get(user_id) == "classic" and user_search_active.get(user_id) else "🔴 Остановлен"
-    balance_text = await get_account_buy_balance_text()
+    balance_text = await get_account_buy_balance_text(user_id=user_id)
 
     text = render_status_card(
         total_sources=len(sources),
@@ -710,7 +711,7 @@ def _build_source_info(src: dict) -> dict:
 
 async def _fetch_source_items(src: dict):
     source_info = _build_source_info(src)
-    items, err = await fetch_with_retry(source_info["url"])
+    items, err = await fetch_with_retry(source_info["url"], user_id=user_id)
     return source_info, items, err
 
 
@@ -778,7 +779,7 @@ async def send_compact_10_for_user(user_id: int, chat_id: int):
 
 async def send_test_for_single_url(user_id: int, chat_id: int, source: dict):
     source_info = _build_source_info(source)
-    items, err = await fetch_with_retry(source_info["url"], max_retries=2)
+    items, err = await fetch_with_retry(source_info["url"], max_retries=2, user_id=user_id)
     if err:
         await send_screen(chat_id, user_id, f"❌ Ошибка проверки URL:\n{html.escape(str(err))}", reply_markup=kb_urls_menu())
         return
