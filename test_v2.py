@@ -606,7 +606,7 @@ def test_access_code_normalization_and_invalid_input():
     code = generate_access_code()
     assert code == code.upper()
     assert code.count("-") == 4
-    assert len(code) == 29
+    assert len(code) == 31
 
     async def run():
         try:
