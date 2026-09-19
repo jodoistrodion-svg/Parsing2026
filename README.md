@@ -67,6 +67,14 @@ For migration, the loader also accepts TELEGRAM_BOT_TOKEN, BOT_TOKEN, LZT_API_TO
 
 The loader validates configuration before Telegram polling starts.
 
+## Commercial access
+
+The bot supports owner-managed one-time access codes. Customers can redeem a code from Telegram; redemption is atomically bound to their Telegram user ID, and the plaintext code is not stored in SQLite.
+
+The owner can use **🔑 Коды доступа** to generate codes, inspect license statistics and revoke access by Telegram ID.
+
+See [COMMERCIAL_ACCESS.md](COMMERCIAL_ACCESS.md) for the commercial deployment checklist. Payment processing is intentionally separate from the licensing layer.
+
 ## Health and metrics
 
 Set HEALTH_PORT=8080 to expose:
