@@ -64,3 +64,20 @@ def test_purchase_idempotency_keys_can_be_scoped_per_user():
         await guard.clear()
 
     asyncio.run(run())
+
+
+def test_autobuy_queue_shutdown_drains_pending_state():
+    from buyer.queue import UserAutobuyQueueManager
+
+    async def run():
+        manager = UserAutobuyQueueManager(maxsize=4, workers_per_user=1)
+        processed = []
+
+        async def handler(user_id, payload):
+            processed.append((user_id, payload))
+
+        assert await manager.enqueue(100, "job", handler)
+        await manager.stop_user(100, drain=False)
+        assert manager.snapshot(100) == []
+
+    asyncio.run(run())
