@@ -59,13 +59,20 @@ Preferred variables:
 
 - API_TOKEN
 - OWNER_ID / OWNER_IDS
-- LZT_API_KEY
+- LZT_API_KEY (legacy/global fallback only)
+- CREDENTIAL_ENCRYPTION_KEY
 - ACCESS_MODE=closed
 - AUTOBUY_MODE=live
 
 For migration, the loader also accepts TELEGRAM_BOT_TOKEN, BOT_TOKEN, LZT_API_TOKEN and ADMIN_TELEGRAM_ID. An old DRY_RUN=true setting is interpreted as AUTOBUY_MODE=dry-run.
 
 The loader validates configuration before Telegram polling starts.
+
+### Per-user LZT credentials
+
+Customers connect their own LZT API token from **🔑 LZT API** inside Telegram. The token is verified against the LZT API, encrypted with a server-side Fernet key, and bound to the Telegram user ID. Search, balance and autobuy requests use that user credential; balance cache and request rate-limit state are isolated per user. The plaintext token is never stored in SQLite or shown in the admin UI.
+
+Generate `CREDENTIAL_ENCRYPTION_KEY` once with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` and keep it outside Git. Losing this key makes encrypted customer credentials unrecoverable; rotate it only with an explicit credential re-encryption migration.
 
 ## Commercial access
 
