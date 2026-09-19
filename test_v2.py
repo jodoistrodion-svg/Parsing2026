@@ -568,7 +568,7 @@ def test_access_code_is_one_time_and_bound_to_one_user(tmp_path):
             await storage.init_db()
             code = await issue_access_code(9001)
             assert code.startswith("P26-")
-            assert len(code) == 29
+            assert len(code) == 31
 
             results = await asyncio.gather(
                 redeem_access_code(1001, code),
