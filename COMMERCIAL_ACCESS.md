@@ -37,6 +37,10 @@ If payments are later accepted **inside Telegram** for digital goods/services, i
 - Decide the commercial entitlement model: lifetime, fixed-term, or subscription. The current implementation is lifetime until manually revoked.
 - Verify that selling/reselling this service is permitted by the LZT/API provider's current terms. This repository does not establish that permission.
 
+## Verification
+
+The licensing changes are covered by the repository test/lint/dependency-audit pipeline before merge.
+
 ## Security properties
 
 - Access codes are generated with Python's `secrets` module.
