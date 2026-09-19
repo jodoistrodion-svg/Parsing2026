@@ -1,0 +1,41 @@
+[tool.pytest.ini_options]
+testpaths = ["test_v2.py"]
+addopts = "-q --strict-config --strict-markers"
+
+[tool.coverage.run]
+branch = true
+source = [
+  "app",
+  "bot",
+  "buyer",
+  "domain",
+  "filters",
+  "market",
+  "metrics",
+  "purchase",
+  "runtime",
+  "services",
+  "storage",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [".git", ".venv", "venv", "build", "dist", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E9", "F", "B"]
+ignore = ["B008", "B904"]
+
+[tool.ruff.lint.per-file-ignores]
+"test_v2.py" = ["B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = true

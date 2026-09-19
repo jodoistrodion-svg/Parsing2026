@@ -346,8 +346,9 @@ def test_all_project_modules_import():
 
     root = Path(__file__).resolve().parent
     failures = []
+    excluded_dirs = {".git", ".venv", "venv", "env", "build", "dist", "__pycache__"}
     for path in root.rglob("*.py"):
-        if "__pycache__" in path.parts or path.name == "test_v2.py":
+        if path.name == "test_v2.py" or any(part in excluded_dirs for part in path.parts):
             continue
         relative = path.relative_to(root).with_suffix("")
         parts = relative.parts
@@ -371,3 +372,247 @@ def test_autobuy_response_classifier_requires_explicit_success():
     assert _autobuy_classify_response(200, "secret answer required")[0] == "secret"
     assert _autobuy_classify_response(200, "cookie accepted")[0] == "retry"
     assert _autobuy_classify_response(200, "")[0] == "success"
+
+
+
+def test_purchase_claim_expiry_recovers_stale_claim():
+    from purchase.idempotency import PurchaseIdempotency
+
+    async def run():
+        manager = PurchaseIdempotency(ttl_seconds=1.0)
+        assert await manager.claim("stale") is True
+        await asyncio.sleep(1.05)
+        assert await manager.claim("stale") is True
+        assert await manager.release("stale") is True
+
+    asyncio.run(run())
+
+
+def test_settings_accept_legacy_aliases_without_exposing_secrets():
+    import os
+    from app.config.settings import load_settings
+
+    names = {
+        "API_TOKEN": os.environ.get("API_TOKEN"),
+        "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
+        "LZT_API_KEY": os.environ.get("LZT_API_KEY"),
+        "LZT_API_TOKEN": os.environ.get("LZT_API_TOKEN"),
+        "OWNER_ID": os.environ.get("OWNER_ID"),
+        "ADMIN_TELEGRAM_ID": os.environ.get("ADMIN_TELEGRAM_ID"),
+    }
+    try:
+        os.environ.pop("API_TOKEN", None)
+        os.environ["TELEGRAM_BOT_TOKEN"] = "123456:abcdefghijklmnopqrstuvwxyz123456"
+        os.environ.pop("LZT_API_KEY", None)
+        os.environ["LZT_API_TOKEN"] = "legacy-lzt-secret"
+        os.environ.pop("OWNER_ID", None)
+        os.environ["ADMIN_TELEGRAM_ID"] = "123456789"
+        loaded = load_settings()
+        assert loaded.api_token.startswith("123456:")
+        assert loaded.lzt_api_key == "legacy-lzt-secret"
+        assert 123456789 in loaded.owner_ids
+        redacted = loaded.redacted()
+        assert redacted["api_token"] == "***"
+        assert redacted["lzt_api_key"] == "***"
+    finally:
+        for name, value in names.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def test_metrics_registry_exports_prometheus_text():
+    from metrics.events import MetricsRegistry
+
+    registry = MetricsRegistry()
+    registry.inc("example_events_total", labels={"kind": "ok"})
+    registry.set("example_ready", 1)
+    registry.observe("example_latency_ms", 12.5)
+
+    text = registry.prometheus_text()
+    assert "example_events_total" in text
+    assert 'kind="ok"' in text
+    assert "example_ready" in text
+    assert "example_latency_ms_count" in text
+
+
+def test_health_state_transitions():
+    from app.runtime.health import RuntimeHealth
+
+    health = RuntimeHealth(started_at=time.monotonic())
+    assert health.snapshot()["ready"] is False
+    health.ready = True
+    snapshot = health.snapshot()
+    assert snapshot["status"] == "ready"
+    health.shutting_down = True
+    assert health.snapshot()["status"] == "stopping"
+
+
+def test_task_supervisor_cleans_cancelled_tasks():
+    from app.runtime.tasks import TaskSupervisor
+
+    async def run():
+        supervisor = TaskSupervisor()
+        started = asyncio.Event()
+
+        async def worker():
+            started.set()
+            await asyncio.Event().wait()
+
+        task = await supervisor.spawn("worker", worker())
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await supervisor.shutdown()
+        return task.done(), task.cancelled(), supervisor.snapshot()
+
+    done, cancelled, snapshot = asyncio.run(run())
+    assert done is True
+    assert cancelled is True
+    assert snapshot == []
+
+
+def test_queue_admission_metrics_are_emitted():
+    from buyer.queue import UserAutobuyQueueManager
+    from metrics.events import METRICS
+
+    async def run():
+        manager = UserAutobuyQueueManager(maxsize=1, workers_per_user=1)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def handler(_uid, _payload):
+            started.set()
+            await release.wait()
+
+        assert await manager.enqueue(1, "one", handler) is True
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert await manager.enqueue(1, "two", handler) is True
+        assert await manager.enqueue(1, "three", handler) is False
+        release.set()
+        await manager.shutdown()
+
+    asyncio.run(run())
+    metrics = METRICS.snapshot()
+    assert any("autobuy_queue_rejected_total" in str(key) for key in metrics["counters"])
+
+
+def test_storage_schema_version_and_retention_cleanup(tmp_path):
+    import app.storage.sqlite as storage
+
+    async def run():
+        original_db_file = storage.DB_FILE
+        original_db = storage._db
+        storage.DB_FILE = str(tmp_path / "test.sqlite")
+        storage._db = None
+        try:
+            await storage.init_db()
+            assert await storage.db_get_schema_version() == 5
+            now = int(time.time())
+            await storage.db_execute(
+                "INSERT OR REPLACE INTO seen(user_id, item_key, seen_at) VALUES (?, ?, ?)",
+                (1, "old", now - 10 * 86400),
+                commit=True,
+            )
+            await storage.db_execute(
+                "INSERT OR REPLACE INTO buy_attempted(user_id, item_key, attempted_at) VALUES (?, ?, ?)",
+                (1, "old", now - 10 * 86400),
+                commit=True,
+            )
+            result = await storage.db_cleanup(
+                seen_retention_days=1,
+                buy_attempt_retention_days=1,
+            )
+            assert result["seen_deleted"] >= 1
+            assert result["buy_attempted_deleted"] >= 1
+        finally:
+            await storage.db_close()
+            storage.DB_FILE = original_db_file
+            storage._db = original_db
+
+    asyncio.run(run())
+
+
+def test_autobuy_dry_run_is_explicit():
+    import app.purchase.autobuy as autobuy
+
+    original_mode = autobuy.AUTOBUY_MODE
+    original_key = autobuy.LZT_API_KEY
+    try:
+        autobuy.AUTOBUY_MODE = "dry-run"
+        autobuy.LZT_API_KEY = "test-key"
+
+        async def run():
+            return await autobuy._try_autobuy_once(
+                {"url": "https://api.lzt.market/mihoyo", "name": "test"},
+                {"id": 123},
+            )
+
+        bought, info = asyncio.run(run())
+        assert bought is True
+        assert "DRY_RUN" in info
+    finally:
+        autobuy.AUTOBUY_MODE = original_mode
+        autobuy.LZT_API_KEY = original_key
+
+
+def test_access_code_is_one_time_and_bound_to_one_user(tmp_path):
+    import app.storage.sqlite as storage
+    from access.licensing import issue_access_code, redeem_access_code, revoke_user_access
+
+    async def run():
+        original_db_file = storage.DB_FILE
+        original_db = storage._db
+        storage.DB_FILE = str(tmp_path / "license.sqlite")
+        storage._db = None
+        try:
+            await storage.init_db()
+            code = await issue_access_code(9001)
+            assert code.startswith("P26-")
+            assert len(code) == 31
+
+            results = await asyncio.gather(
+                redeem_access_code(1001, code),
+                redeem_access_code(1002, code),
+            )
+            assert sorted(results) == ["redeemed", "used"]
+
+            winner = 1001 if results[0] == "redeemed" else 1002
+            loser = 1002 if winner == 1001 else 1001
+            assert await storage.db_is_allowed(winner) is True
+            assert await storage.db_is_allowed(loser) is False
+
+            rows = await storage.db_fetchall(
+                "SELECT code_hash, redeemed_by, redeemed_at FROM access_codes"
+            )
+            assert len(rows) == 1
+            assert rows[0][0] != code
+            assert rows[0][1] == winner
+            assert rows[0][2] is not None
+
+            assert await redeem_access_code(winner, code) == "already_active"
+            assert await revoke_user_access(winner) == 1
+            assert await storage.db_is_allowed(winner) is False
+        finally:
+            await storage.db_close()
+            storage.DB_FILE = original_db_file
+            storage._db = original_db
+
+    asyncio.run(run())
+
+
+def test_access_code_normalization_and_invalid_input():
+    from access.licensing import generate_access_code, redeem_access_code
+
+    code = generate_access_code()
+    assert code == code.upper()
+    assert code.count("-") == 4
+    assert len(code) == 31
+
+    async def run():
+        try:
+            await redeem_access_code(123, "definitely-not-a-code")
+        except ValueError:
+            return True
+        return False
+
+    assert asyncio.run(run()) is True

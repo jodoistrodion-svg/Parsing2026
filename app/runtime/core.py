@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import os
 import re
 import time
 from collections import defaultdict
@@ -22,11 +21,16 @@ from purchase.idempotency import PurchaseIdempotency
 from services.logging_setup import setup_logging
 
 from app.config.settings import (
+    API_TOKEN,
     AUTOBUY_LOG_FILE,
+    BUY_SEMAPHORE,
     HUNTER_INTERVAL_BASE,
+    LOG_FORMAT,
+    LOG_LEVEL,
     LOG_MAX_BYTES,
     LOG_ROTATE_KEEP,
     LIMITED_EXTRA_DELAY,
+    LZT_API_KEY,
     MAX_URLS_PER_USER_DEFAULT,
     MAX_URLS_PER_USER_LIMITED,
     MAX_URL_NAME_LEN,
@@ -38,7 +42,14 @@ from app.config.settings import (
 )
 from market.discovery import _run_bounded
 
-logger = setup_logging(AUTOBUY_LOG_FILE, LOG_MAX_BYTES, LOG_ROTATE_KEEP)
+logger = setup_logging(
+    AUTOBUY_LOG_FILE,
+    LOG_MAX_BYTES,
+    LOG_ROTATE_KEEP,
+    level=LOG_LEVEL,
+    log_format=LOG_FORMAT,
+    secrets=(API_TOKEN, LZT_API_KEY),
+)
 
 
 def _safe_compact(s: str, n: int = 400) -> str:
@@ -82,8 +93,9 @@ WELCOME_STICKERS = [
 ]
 
 DENIED_TEXT = (
-    "⛔️ Доступ к боту закрыт по умолчанию.\n\n"
-    "Нажми кнопку ниже, чтобы отправить запрос владельцу."
+    "⛔️ Доступ к боту закрыт.\n\n"
+    "Если ты приобрёл доступ, введи выданный код.\n"
+    "Если кода нет — можно отправить запрос владельцу."
 )
 
 
@@ -99,7 +111,21 @@ def kb_button(text: str, style: str | None = None) -> KeyboardButton:
 
 def kb_request() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[kb_button("🔓 Запрос на бота", "primary")]],
+        keyboard=[
+            [kb_button("🔑 Ввести код доступа", "success")],
+            [kb_button("🔓 Запрос на бота", "primary")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def kb_license_admin() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [kb_button("➕ Создать код", "success"), kb_button("📊 Статистика кодов")],
+            [kb_button("📋 Последние коды"), kb_button("🚫 Отозвать по ID", "danger")],
+            [kb_button("⬅️ Назад")],
+        ],
         resize_keyboard=True,
     )
 
@@ -109,11 +135,22 @@ def kb_main(user_id: int) -> ReplyKeyboardMarkup:
         [kb_button("🚀 Старт охотника", "success"), kb_button("🛑 Стоп охотника")],
         [kb_button("✨ Проверка лотов", "primary"), kb_button("📊 Статус")],
         [kb_button("📚 Мои URL", "primary"), kb_button("♻️ Сбросить историю")],
+        [kb_button("🔑 LZT API", "primary")],
         [kb_button("ℹ️ Инфо")],
     ]
     if user_id in OWNER_IDS:
-        rows.insert(4, [kb_button("👥 Пользователи", "primary")])
+        rows.insert(4, [kb_button("👥 Пользователи", "primary"), kb_button("🔑 Коды доступа", "success")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+def kb_lzt_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [kb_button("🔗 Подключить / заменить"), kb_button("🔄 Проверить")],
+            [kb_button("🗑 Удалить подключение"), kb_button("⬅️ Назад")],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def kb_urls_menu() -> ReplyKeyboardMarkup:
@@ -397,7 +434,7 @@ user_page_state = defaultdict(lambda: {"ctx": None, "page": 0})
 
 autobuy_endpoint_cache: dict[str, list[str]] = {}
 buy_locks: dict[str, asyncio.Lock] = {}
-buy_semaphore = asyncio.Semaphore(int((os.getenv("BUY_SEMAPHORE") or "128").strip()))
+buy_semaphore = asyncio.Semaphore(BUY_SEMAPHORE)
 
 
 def get_buy_lock(item_key: str) -> asyncio.Lock:
@@ -596,7 +633,7 @@ async def show_status(user_id: int, chat_id: int):
     active_sources = sum(1 for s in sources if s.get("enabled", True))
     autobuy_sources = sum(1 for s in sources if s.get("autobuy", False))
     hunter_state = "🟢 Запущен" if user_hunter_mode.get(user_id) == "classic" and user_search_active.get(user_id) else "🔴 Остановлен"
-    balance_text = await get_account_buy_balance_text()
+    balance_text = await get_account_buy_balance_text(user_id=user_id)
 
     text = render_status_card(
         total_sources=len(sources),
@@ -682,9 +719,9 @@ def _build_source_info(src: dict) -> dict:
     }
 
 
-async def _fetch_source_items(src: dict):
+async def _fetch_source_items(src: dict, user_id: int):
     source_info = _build_source_info(src)
-    items, err = await fetch_with_retry(source_info["url"])
+    items, err = await fetch_with_retry(source_info["url"], user_id=user_id)
     return source_info, items, err
 
 
@@ -696,7 +733,7 @@ async def fetch_all_sources(user_id: int):
     sources.sort(key=lambda s: (not bool(s.get("autobuy", False)), s.get("idx", 0)))
     items_with_sources = []
     errors = []
-    async for res in _run_bounded(sources, _fetch_source_items):
+    async for res in _run_bounded(sources, lambda src: _fetch_source_items(src, user_id)):
         if isinstance(res, Exception):
             errors.append(("UNKNOWN", "UNKNOWN", str(res)))
             continue
@@ -724,10 +761,10 @@ async def iter_sources_results_split(user_id: int, include_non_autobuy: bool):
     autobuy_sources = [s for s in sources if s.get("autobuy", False)]
     plain_sources = [s for s in sources if not s.get("autobuy", False)]
 
-    async for result in _run_bounded(autobuy_sources, _fetch_source_items):
+    async for result in _run_bounded(autobuy_sources, lambda src: _fetch_source_items(src, user_id)):
         yield result
     if include_non_autobuy:
-        async for result in _run_bounded(plain_sources, _fetch_source_items):
+        async for result in _run_bounded(plain_sources, lambda src: _fetch_source_items(src, user_id)):
             yield result
 
 
@@ -752,7 +789,7 @@ async def send_compact_10_for_user(user_id: int, chat_id: int):
 
 async def send_test_for_single_url(user_id: int, chat_id: int, source: dict):
     source_info = _build_source_info(source)
-    items, err = await fetch_with_retry(source_info["url"], max_retries=2)
+    items, err = await fetch_with_retry(source_info["url"], max_retries=2, user_id=user_id)
     if err:
         await send_screen(chat_id, user_id, f"❌ Ошибка проверки URL:\n{html.escape(str(err))}", reply_markup=kb_urls_menu())
         return

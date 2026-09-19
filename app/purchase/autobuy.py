@@ -10,10 +10,11 @@ from urllib.parse import urlsplit
 
 from app.config.settings import (
     AUTOBUY_BURST_FIRST_WAVE, AUTOBUY_MAX_DURATION_SEC, AUTOBUY_MAX_HTTP_ATTEMPTS,
+    AUTOBUY_MODE,
     AUTOBUY_PARALLEL_HTTP, AUTOBUY_QUEUE_RETRY_MAX_DELAY, AUTOBUY_QUEUE_RETRY_MIN_DELAY,
     AUTOBUY_RETRY_ATTEMPTS, AUTOBUY_RETRY_MAX_DELAY, AUTOBUY_RETRY_MIN_DELAY,
     AUTOBUY_TOTAL_RETRY_WINDOW_SEC, AUTOBUY_URL_LIMIT, FAST_AUTOBUY_TIMEOUT,
-    LZT_API_KEY, LZT_BALANCE_ID, LZT_SECRET_WORD, MAX_ITEMS_PER_SOURCE_SCAN,
+    LZT_API_KEY as _LEGACY_LZT_API_KEY, LZT_BALANCE_ID, LZT_SECRET_WORD, MAX_ITEMS_PER_SOURCE_SCAN,
     MAX_NEW_ITEMS_PER_CYCLE, NON_AUTOBUY_CYCLE_EVERY,
 )
 from app.runtime.core import (
@@ -24,11 +25,15 @@ from app.runtime.core import (
     user_hunter_interval, user_hunter_mode, user_hunter_tasks, user_notify_queues,
     user_notify_workers, user_search_active, user_seen_items, iter_sources_results_split,
 )
-from app.services.market_api import _api_limit_bucket, _default_api_headers, get_session, request_rate_limiter
+from app.services.market_api import _api_headers_for_user, _api_limit_bucket, get_session, request_rate_limiter
 from app.storage.sqlite import db_mark_buy_attempted, db_mark_seen_batch
 from bot.autobuy_strategy import build_buy_urls, prioritize_buy_urls
 from domain.decision import DecisionEngine
 from market.pipeline import DiscoveryPipeline
+from metrics.events import METRICS
+
+# Backward-compatible test/config surface; live requests use per-user credentials.
+LZT_API_KEY = _LEGACY_LZT_API_KEY
 
 def _autobuy_buy_urls(source_url: str, item_id: int):
     return build_buy_urls(source_url, item_id)
@@ -260,9 +265,15 @@ def _normalize_command_text(text: str) -> str:
     return ""
 
 
-async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None = None, max_duration_override: float | None = None):
-    if not LZT_API_KEY:
-        return False, "LZT_API_KEY не задан"
+async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None = None, max_duration_override: float | None = None, user_id: int | None = None):
+    if AUTOBUY_MODE != "dry-run":
+        headers_probe = await _api_headers_for_user(user_id)
+        if "Authorization" not in headers_probe:
+            return False, "LZT API не подключён для этого пользователя"
+
+    if AUTOBUY_MODE == "dry-run":
+        METRICS.inc("autobuy_dry_run_total")
+        return True, "DRY_RUN: покупка не отправлялась в LZT API"
 
     item_id = item.get("item_id") or item.get("id")
     if not item_id:
@@ -283,12 +294,20 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
     if not buy_urls:
         return False, "buy_url_not_found"
 
+    lot_price = _extract_item_price(item)
+    if lot_price in (None, "", "—"):
+        return False, "missing_item_price"
+    try:
+        lot_price = float(lot_price)
+    except (TypeError, ValueError):
+        return False, f"invalid_item_price={lot_price!r}"
+    if lot_price < 0:
+        return False, f"invalid_item_price={lot_price!r}"
+
     payload = {
+        "price": lot_price,
         "balance_id": LZT_BALANCE_ID,
-        "buy_without_validation": 1,
     }
-    if LZT_SECRET_WORD:
-        payload["secret_answer"] = LZT_SECRET_WORD
 
     since_found_ms = None
     if found_perf is not None:
@@ -300,42 +319,32 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
 
     log_autobuy(
         f"BUY_START item_id={item_id} src='{_safe_compact(source_name,120)}' "
-        f"since_found_ms={since_found_ms} urls={len(attempt_urls)} parallel={parallel_requests} buy_without_validation=1"
+        f"since_found_ms={since_found_ms} urls={len(attempt_urls)} parallel={parallel_requests} "
+        f"price={lot_price} balance_id={LZT_BALANCE_ID}"
     )
 
     session = await get_session()
-    common_headers = _default_api_headers()
+    common_headers = await _api_headers_for_user(user_id)
+    if "Authorization" not in common_headers:
+        return False, "LZT API не подключён для этого пользователя"
     headers_json = {**common_headers, "Content-Type": "application/json"}
-    headers_form = {**common_headers, "Content-Type": "application/x-www-form-urlencoded"}
 
     async def _post_buy(idx: int, buy_url: str):
         post_started = time.perf_counter()
         try:
             bucket, min_interval = _api_limit_bucket("POST", buy_url)
+            limiter_bucket = f"user:{user_id}:{bucket}"
 
-            await request_rate_limiter.wait(bucket, min_interval)
+            await request_rate_limiter.wait(limiter_bucket, min_interval)
             t4 = time.perf_counter()
             async with session.post(buy_url, headers=headers_json, json=payload, timeout=FAST_AUTOBUY_TIMEOUT) as resp:
                 body = await resp.text()
                 t5 = time.perf_counter()
-                state, info, force_form = _autobuy_classify_response(resp.status, body)
+                state, info, _force_form = _autobuy_classify_response(resp.status, body)
                 log_autobuy(
                     f"BUY_DIRECT item_id={item_id} attempt={idx}/{len(attempt_urls)} "
                     f"status={resp.status} state={state} mode=json url={buy_url} post_ms={int((t5-t4)*1000)} total_ms={int((t5-post_started)*1000)} info='{_safe_compact(info,220)}'"
                 )
-
-            if force_form:
-                # Фолбэк формой запускаем сразу, без дополнительной паузы,
-                # чтобы не терять драгоценные миллисекунды на hot-path автобая.
-                async with session.post(buy_url, headers=headers_form, data=payload, timeout=FAST_AUTOBUY_TIMEOUT) as resp_form:
-                    body_form = await resp_form.text()
-                    t5_form = time.perf_counter()
-                    state_form, info_form, _ = _autobuy_classify_response(resp_form.status, body_form)
-                    log_autobuy(
-                        f"BUY_DIRECT item_id={item_id} attempt={idx}/{len(attempt_urls)} "
-                        f"status={resp_form.status} state={state_form} mode=form url={buy_url} post_ms={int((t5_form-t4)*1000)} total_ms={int((t5_form-post_started)*1000)} info='{_safe_compact(info_form,220)}'"
-                    )
-                    return idx, buy_url, resp_form.status, state_form, info_form
 
             return idx, buy_url, resp.status, state, info
         except asyncio.TimeoutError:
@@ -443,9 +452,10 @@ def _remaining_autobuy_window_sec(found_perf: float | None) -> float | None:
     return AUTOBUY_TOTAL_RETRY_WINDOW_SEC - elapsed
 
 
-async def try_autobuy_item(source: dict, item: dict, found_perf: float | None = None):
+async def try_autobuy_item(source: dict, item: dict, found_perf: float | None = None, user_id: int | None = None):
     item_key = make_item_key(item)
-    lock = get_buy_lock(item_key)
+    scoped_item_key = f"user::{int(user_id) if user_id is not None else 0}::{item_key}"
+    lock = get_buy_lock(scoped_item_key)
 
     async with lock:
         attempts_limit = AUTOBUY_RETRY_ATTEMPTS if AUTOBUY_RETRY_ATTEMPTS > 0 else None
@@ -458,7 +468,7 @@ async def try_autobuy_item(source: dict, item: dict, found_perf: float | None = 
             if max_attempt_window is not None and max_attempt_window <= 0:
                 return False, f"attempt={i}/{attempts_limit if attempts_limit is not None else '∞'} | autobuy_total_retry_window_exceeded"
 
-            bought, info = await _try_autobuy_once(source, item, found_perf=found_perf, max_duration_override=max_attempt_window)
+            bought, info = await _try_autobuy_once(source, item, found_perf=found_perf, max_duration_override=max_attempt_window, user_id=user_id)
             last_info = str(info)
             if bought:
                 total = attempts_limit if attempts_limit is not None else "∞"
@@ -484,12 +494,13 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
     bought = False
     buy_info = "autobuy_not_started"
     should_mark_attempt = False
-    claimed = await purchase_idempotency.claim(item_key)
+    scoped_item_key = f"user::{int(user_id)}::{item_key}"
+    claimed = await purchase_idempotency.claim(scoped_item_key)
     if not claimed:
         user_buy_inflight[user_id].discard(item_key)
         return
     try:
-        bought, buy_info = await try_autobuy_item(source, item, found_perf=found_perf)
+        bought, buy_info = await try_autobuy_item(source, item, found_perf=found_perf, user_id=user_id)
         should_mark_attempt = _autobuy_should_mark_attempt(bought, str(buy_info))
         user_buy_inflight[user_id].discard(item_key)
         if should_mark_attempt and item_key not in user_buy_attempted[user_id]:
@@ -500,42 +511,10 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
         buy_info = f"autobuy_runtime_error: {e}"
         log_autobuy(f"BUY_MARK_ERR user_id={user_id} item_key={item_key} err='{_safe_compact(str(e),220)}'")
     finally:
-        await purchase_idempotency.release(item_key)
+        await purchase_idempotency.release(scoped_item_key)
 
     dur_ms = int((time.perf_counter() - found_perf) * 1000)
     log_autobuy(f"BUY_T6_RESULT item_id={item_id} since_found_ms={dur_ms} bought={int(bool(bought))}")
-    bought_link = item.get("url") or item.get("link") or (f"https://lzt.market/{item_id}" if item_id is not None else "")
-    lot_price = _extract_item_price(item)
-    lot_time = _format_item_time_human(_extract_item_time(item))
-    now_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    result_emoji = "✅" if bought else "❌"
-    result_word = "Успех" if bought else "Ошибка"
-    buy_result_text = (
-        f"🛒 <b>Автобай {result_emoji}</b> [{html.escape(src_name)}]\n"
-        f"📌 Статус: <b>{result_word}</b>\n"
-        f"🆔 item_id: <code>{html.escape(str(item_id))}</code>\n"
-        f"⏱ Время покупки: <b>{html.escape(now_text)}</b>\n"
-        f"⚡ Задержка после обнаружения: <b>{dur_ms}ms</b>\n"
-        f"💰 Цена: <b>{html.escape(_format_value(lot_price) if lot_price is not None else '—')} ₽</b>\n"
-        f"🕒 Время лота: <b>{html.escape(lot_time)}</b>\n"
-        f"🔗 Лот: {html.escape(str(bought_link))}\n"
-        f"ℹ️ Детали: {html.escape(_sanitize_buy_info_for_user(str(buy_info)))}"
-    )
-
-    log_autobuy(
-        f"BUY_RESULT user_id={user_id} item_key={item_key} bought={int(bool(bought))} "
-        f"persist_attempt={int(bool(should_mark_attempt))} info='{_safe_compact(str(buy_info),240)}'"
-    )
-
-    await _send_buy_result_immediately(chat_id, user_id, buy_result_text)
-
-
-async def _autobuy_queue_handler(user_id: int, payload: tuple[int, dict, dict, float]):
-    chat_id, source, item, found_perf = payload
-    await _run_autobuy_and_notify(user_id, chat_id, source, item, found_perf)
-
-
-
 
 async def _mark_seen_and_batch(key: str, user_id: int, seen_batch: list[str]):
     user_seen_items[user_id].add(key)
@@ -556,6 +535,7 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
     await load_user_data(user_id)
     user_buy_inflight[user_id].clear()
     ensure_notify_worker(user_id)
+    await autobuy_queue_manager.ensure_worker(user_id, _autobuy_queue_handler)
     no_lots_streak = 0
     cycle_num = 0
 
