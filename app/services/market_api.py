@@ -308,29 +308,33 @@ async def get_account_buy_balance_text(user_id: int | None = None, force: bool =
     if user_id is None and "Authorization" not in headers:
         return "—"
 
-    urls = [
-        f"{LZT_BASE_URL}/balance/exchange",
-        "https://prod-api.lzt.market/balance/exchange",
-        "https://api.lzt.market/balance/exchange",
-    ]
+    url = f"{LZT_BASE_URL}/balance/exchange"
+    limiter_bucket = f"user:{user_id}:other-global" if user_id is not None else "other-global"
+    await request_rate_limiter.wait(limiter_bucket, OTHER_MIN_REQUEST_INTERVAL)
+    await adaptive_rate_limiter.before_request(limiter_bucket)
     session = await get_session()
-    for url in urls:
-        try:
-            async with session.get(url, headers=headers, timeout=FETCH_TIMEOUT) as resp:
-                body = await resp.text()
-                if resp.status != 200:
-                    continue
-                try:
-                    data = json.loads(body)
-                except Exception:
-                    continue
-                parsed = _extract_account_buy_balance_text(data)
-                if parsed:
-                    cache["text"] = parsed
-                    cache["ts"] = now
-                    return parsed
-        except Exception:
-            continue
+    try:
+        async with session.get(url, headers=headers, timeout=FETCH_TIMEOUT) as resp:
+            await adaptive_rate_limiter.observe(limiter_bucket, resp.headers)
+            body = await resp.text()
+            if resp.status == 429:
+                retry_after = _retry_after_seconds(resp.headers)
+                if retry_after is not None:
+                    await adaptive_rate_limiter.note_retry_after(limiter_bucket, retry_after)
+                return str(cache["text"]) if cache["text"] != "—" else "🔴 LZT временно ограничил запросы"
+            if resp.status != 200:
+                return str(cache["text"]) if cache["text"] != "—" else "—"
+            try:
+                data = json.loads(body)
+            except Exception:
+                return str(cache["text"]) if cache["text"] != "—" else "—"
+            parsed = _extract_account_buy_balance_text(data)
+            if parsed:
+                cache["text"] = parsed
+                cache["ts"] = now
+                return parsed
+    except (asyncio.TimeoutError, aiohttp.ClientError):
+        pass
     return str(cache["text"]) if cache["text"] != "—" else "—"
 
 
@@ -345,28 +349,25 @@ async def verify_lzt_token(token: str) -> tuple[bool, str]:
         "Authorization": f"Bearer {token}",
     }
     session = await get_session()
-    urls = [
-        f"{LZT_BASE_URL}/balance/exchange",
-        "https://prod-api.lzt.market/balance/exchange",
-        "https://api.lzt.market/balance/exchange",
-    ]
-    for url in urls:
-        try:
-            async with session.get(url, headers=headers, timeout=max(FETCH_TIMEOUT, 3.0)) as resp:
-                body = await resp.text()
-                if resp.status == 200:
-                    try:
-                        data = json.loads(body)
-                    except Exception:
-                        data = {}
-                    label = _extract_account_buy_balance_text(data) or "LZT подключён"
-                    return True, label
-                if resp.status in (401, 403):
-                    return False, "LZT отклонил токен (401/403)."
-        except (asyncio.TimeoutError, aiohttp.ClientError):
-            continue
-        except Exception:
-            continue
+    url = f"{LZT_BASE_URL}/balance/exchange"
+    limiter_bucket = "verify:other-global"
+    await request_rate_limiter.wait(limiter_bucket, OTHER_MIN_REQUEST_INTERVAL)
+    await adaptive_rate_limiter.before_request(limiter_bucket)
+    try:
+        async with session.get(url, headers=headers, timeout=max(FETCH_TIMEOUT, 3.0)) as resp:
+            await adaptive_rate_limiter.observe(limiter_bucket, resp.headers)
+            body = await resp.text()
+            if resp.status == 200:
+                try:
+                    data = json.loads(body)
+                except Exception:
+                    data = {}
+                label = _extract_account_buy_balance_text(data) or "LZT подключён"
+                return True, label
+            if resp.status in (401, 403):
+                return False, "LZT отклонил токен (401/403)."
+    except (asyncio.TimeoutError, aiohttp.ClientError):
+        pass
     return False, "Не удалось проверить токен через LZT API."
 
 
