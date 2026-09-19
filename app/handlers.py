@@ -18,7 +18,7 @@ from app.config.settings import (
     USER_PAGE_SIZE,
 )
 from app.runtime.core import (
-    START_MSG_1, START_MSG_2, build_urls_picker_kb, dp, get_user_hunter_start_lock,
+    START_MSG_1, START_MSG_2, autobuy_queue_manager, build_urls_picker_kb, dp, get_user_hunter_start_lock,
     kb_main, kb_request, kb_license_admin, kb_lzt_menu, kb_urls_menu, load_user_data, log_autobuy,
     parse_index_from_button, parse_user_id_from_button, safe_delete, sanitize_url_name,
     send_bot_message, send_screen, send_welcome_sticker, show_denied, show_status, _safe_compact,
@@ -282,6 +282,7 @@ async def buttons_handler(message: types.Message):
                 if task and not task.done():
                     task.cancel()
                 user_hunter_tasks.pop(user_id, None)
+                await autobuy_queue_manager.stop_user(user_id, drain=False)
                 await send_screen(chat_id, user_id, "✅ LZT подключение удалено. Охотник остановлен.", reply_markup=kb_main(user_id))
                 user_modes[user_id] = None
                 return await safe_delete(message)
@@ -299,6 +300,13 @@ async def buttons_handler(message: types.Message):
                 user_modes[user_id] = "lzt_menu"
                 await send_screen(chat_id, user_id, f"❌ <b>Token не принят</b>\n{html.escape(label)}\n\nНичего не сохранено.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
                 return await safe_delete(message)
+            await autobuy_queue_manager.stop_user(user_id, drain=False)
+            user_search_active[user_id] = False
+            user_hunter_mode[user_id] = "off"
+            task = user_hunter_tasks.get(user_id)
+            if task and not task.done():
+                task.cancel()
+            user_hunter_tasks.pop(user_id, None)
             await save_lzt_token(user_id, token, account_label=label, verified_at=int(time.time()))
             invalidate_balance_cache(user_id)
             user_modes[user_id] = "lzt_menu"
@@ -397,6 +405,7 @@ async def buttons_handler(message: types.Message):
                 if target_task and not target_task.done():
                     target_task.cancel()
                 user_hunter_tasks.pop(target_uid, None)
+                await autobuy_queue_manager.stop_user(target_uid, drain=False)
                 log_autobuy(f"LICENSE_REVOKE user_id={target_uid} by_admin={user_id}")
 
                 try:
