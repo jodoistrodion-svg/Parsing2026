@@ -51,3 +51,16 @@ def test_fast_buy_payload_contract_requires_current_price():
     assert autobuy._extract_item_price({"price": 12.34}) == 12.34
     assert autobuy._extract_item_price({"amount": 12.34}) == 12.34
     assert autobuy._extract_item_price({}) is None
+
+
+def test_purchase_idempotency_keys_can_be_scoped_per_user():
+    from purchase.idempotency import PurchaseIdempotency
+
+    async def run():
+        guard = PurchaseIdempotency()
+        assert await guard.claim("user::100::id::42")
+        assert await guard.claim("user::200::id::42")
+        assert not await guard.claim("user::100::id::42")
+        await guard.clear()
+
+    asyncio.run(run())
