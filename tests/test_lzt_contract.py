@@ -79,5 +79,9 @@ def test_autobuy_queue_shutdown_drains_pending_state():
         assert await manager.enqueue(100, "job", handler)
         await manager.stop_user(100, drain=False)
         assert manager.snapshot(100) == []
+        assert not await manager.enqueue(100, "late-job", handler)
+        await manager.ensure_worker(100, handler)
+        assert await manager.enqueue(100, "new-session-job", handler)
+        await manager.stop_user(100, drain=False)
 
     asyncio.run(run())
