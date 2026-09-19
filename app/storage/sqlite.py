@@ -229,7 +229,7 @@ async def db_redeem_access_code(user_id: int, code_hash: str) -> str:
                 return "revoked"
             if row[0] is not None:
                 await db.rollback()
-                return "used"
+                return "already_active" if int(row[0]) == user_id else "used"
 
             active = await db.execute(
                 "SELECT 1 FROM access_codes WHERE redeemed_by=? AND revoked_at IS NULL LIMIT 1",
