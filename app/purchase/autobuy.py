@@ -515,3 +515,111 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
 
     dur_ms = int((time.perf_counter() - found_perf) * 1000)
     log_autobuy(f"BUY_T6_RESULT item_id={item_id} since_found_ms={dur_ms} bought={int(bool(bought))}")
+
+async def _mark_seen_and_batch(key: str, user_id: int, seen_batch: list[str]):
+    user_seen_items[user_id].add(key)
+    seen_batch.append(key)
+
+def cleanup_user_hunter_runtime(user_id: int):
+    user_buy_inflight[user_id].clear()
+    task = user_hunter_tasks.get(user_id)
+    if task is asyncio.current_task():
+        user_hunter_tasks.pop(user_id, None)
+    worker = user_notify_workers.get(user_id)
+    if worker is not None and worker.done():
+        user_notify_workers.pop(user_id, None)
+        user_notify_queues.pop(user_id, None)
+
+
+async def hunter_loop_for_user(user_id: int, chat_id: int):
+    await load_user_data(user_id)
+    user_buy_inflight[user_id].clear()
+    ensure_notify_worker(user_id)
+    await autobuy_queue_manager.ensure_worker(user_id, _autobuy_queue_handler)
+    no_lots_streak = 0
+    cycle_num = 0
+
+    async def fetch_sources(uid: int, *, include_non_autobuy: bool):
+        async for result in iter_sources_results_split(uid, include_non_autobuy=include_non_autobuy):
+            yield result
+
+    async def mark_seen(key: str):
+        user_seen_items[user_id].add(key)
+
+    async def enqueue_autobuy(source: dict, item: dict, found_perf: float):
+        key = make_item_key(item)
+        if key in user_buy_attempted[user_id] or key in user_buy_inflight[user_id]:
+            return False
+        user_buy_inflight[user_id].add(key)
+        try:
+            admitted = await autobuy_queue_manager.enqueue(
+                user_id, (chat_id, source, item, found_perf), _autobuy_queue_handler
+            )
+            if admitted is False:
+                user_buy_inflight[user_id].discard(key)
+            return admitted
+        except Exception:
+            user_buy_inflight[user_id].discard(key)
+            raise
+
+    while user_search_active[user_id]:
+        cycle_num += 1
+        include_non_autobuy = NON_AUTOBUY_CYCLE_EVERY <= 1 or (cycle_num % NON_AUTOBUY_CYCLE_EVERY == 0)
+        seen_batch: list[str] = []
+        new_items_processed = 0
+        try:
+            pipeline = DiscoveryPipeline(
+                fetch_sources=fetch_sources,
+                make_key=make_item_key,
+                is_seen=lambda key: key in user_seen_items[user_id],
+                is_attempted=lambda key: key in user_buy_attempted[user_id] or key in user_buy_inflight[user_id],
+                mark_seen=lambda key: _mark_seen_and_batch(key, user_id, seen_batch),
+                enqueue_autobuy=enqueue_autobuy,
+                decision=DecisionEngine(),
+                max_items_per_source=MAX_ITEMS_PER_SOURCE_SCAN,
+                max_new_items_per_cycle=MAX_NEW_ITEMS_PER_CYCLE,
+            )
+            accepted, stats, errors = await pipeline.run(user_id, include_non_autobuy=include_non_autobuy)
+            for _name, _url, _err in errors:
+                user_api_errors[user_id] += 1
+
+            for entry in accepted:
+                if MAX_NEW_ITEMS_PER_CYCLE > 0 and new_items_processed >= MAX_NEW_ITEMS_PER_CYCLE:
+                    break
+                src_name = entry.source.get("name") or "UNKNOWN"
+                try:
+                    await send_bot_message(
+                        chat_id, make_card(entry.item, src_name),
+                        parse_mode="HTML", disable_web_page_preview=True
+                    )
+                except Exception as e:
+                    log_autobuy(f"LOT_NOTIFY_SEND_ERR user_id={user_id} err='{_safe_compact(str(e),240)}'")
+                new_items_processed += 1
+
+            if new_items_processed == 0:
+                no_lots_streak += 1
+            else:
+                no_lots_streak = 0
+                reset_no_lots_message(user_id)
+
+            if seen_batch:
+                await db_mark_seen_batch(user_id, seen_batch)
+            await asyncio.sleep(await user_hunter_interval(user_id))
+
+        except asyncio.CancelledError:
+            user_hunter_mode[user_id] = "off"
+            break
+        except Exception as e:
+            if seen_batch:
+                try:
+                    await db_mark_seen_batch(user_id, seen_batch)
+                except Exception:
+                    pass
+            user_api_errors[user_id] += 1
+            log_autobuy(f"HUNTER_EXC user_id={user_id} err='{_safe_compact(str(e),400)}'")
+            await asyncio.sleep(max(await user_hunter_interval(user_id), 0.01))
+
+    await autobuy_queue_manager.stop_user(user_id)
+    cleanup_user_hunter_runtime(user_id)
+
+__all__ = [name for name in globals() if not name.startswith("__")]
