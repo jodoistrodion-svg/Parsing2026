@@ -286,10 +286,30 @@ async def buttons_handler(message: types.Message):
 
             revoked = await revoke_user_access(target_uid)
             user_modes[user_id] = "license_admin"
+
             if revoked:
+                # Revocation must terminate an already-running hunter immediately;
+                # access checks on future messages alone are not sufficient.
+                user_search_active[target_uid] = False
+                user_hunter_mode[target_uid] = "off"
+                target_task = user_hunter_tasks.get(target_uid)
+                if target_task and not target_task.done():
+                    target_task.cancel()
+                user_hunter_tasks.pop(target_uid, None)
+                log_autobuy(f"LICENSE_REVOKE user_id={target_uid} by_admin={user_id}")
+
+                try:
+                    await send_bot_message(
+                        target_uid,
+                        "🚫 Твой доступ к боту отозван владельцем. Активный охотник остановлен.",
+                    )
+                except Exception:
+                    pass
+
                 result_text = f"🚫 Доступ пользователя <code>{target_uid}</code> отозван. Лицензионных кодов: <b>{revoked}</b>."
             else:
                 result_text = f"ℹ️ Активной лицензии для <code>{target_uid}</code> не найдено."
+
             await send_screen(chat_id, user_id, result_text, reply_markup=kb_license_admin(), parse_mode="HTML")
             return await safe_delete(message)
 
