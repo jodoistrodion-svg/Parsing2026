@@ -25,6 +25,12 @@ payment confirmed by owner -> generate code -> send code -> buyer redeems code
 
 If payments are later accepted **inside Telegram** for digital goods/services, implement Telegram Stars (`XTR`) payment handling and store successful payment charge IDs before delivering access. Telegram's current documentation also calls for accessible terms and customer support.
 
+## Per-user LZT credentials
+
+Each licensed Telegram user can connect a personal LZT API token from **🔑 LZT API**. The token is verified before persistence, encrypted with `CREDENTIAL_ENCRYPTION_KEY`, and stored against that Telegram user ID. Search, balance and autobuy requests resolve credentials from that user ID; credentials are not exposed through the owner UI. Removing the connection stops the user hunter, drains/cancels its queue through the existing per-user queue manager, invalidates its balance cache, and deletes the encrypted credential.
+
+`CREDENTIAL_ENCRYPTION_KEY` is a server secret. Back up it separately from SQLite. Without the key, encrypted customer credentials cannot be recovered.
+
 ## Before commercial launch
 
 - Obtain and configure a valid LZT API key. The current V3 runtime intentionally fails closed for missing LZT credentials; without an LZT key, the Telegram shell can run but the LZT-dependent product functionality cannot be sold as operational.
