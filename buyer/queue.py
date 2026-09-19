@@ -33,6 +33,7 @@ class UserAutobuyQueueManager:
         self._workers_per_user = max(1, int(workers_per_user))
         self._queues: dict[int, asyncio.Queue[Any]] = {}
         self._workers: dict[int, list[asyncio.Task[Any]]] = {}
+        self._stopped_users: set[int] = set()
         self._lock = asyncio.Lock()
 
     def _get_queue(self, user_id: int) -> asyncio.Queue[Any]:
@@ -55,6 +56,7 @@ class UserAutobuyQueueManager:
 
     async def ensure_worker(self, user_id: int, handler: JobHandler) -> None:
         async with self._lock:
+            self._stopped_users.discard(user_id)
             queue = self._get_queue(user_id)
             self._ensure_workers_locked(user_id, queue, handler)
 
@@ -65,6 +67,9 @@ class UserAutobuyQueueManager:
         handler: JobHandler,
     ) -> bool:
         async with self._lock:
+            if user_id in self._stopped_users:
+                METRICS.inc("autobuy_queue_rejected_stopped_total")
+                return False
             queue = self._get_queue(user_id)
             self._ensure_workers_locked(user_id, queue, handler)
             try:
@@ -88,6 +93,7 @@ class UserAutobuyQueueManager:
 
     async def stop_user(self, user_id: int, *, drain: bool = False) -> None:
         async with self._lock:
+            self._stopped_users.add(user_id)
             workers = self._workers.pop(user_id, [])
             queue = self._queues.pop(user_id, None)
 
