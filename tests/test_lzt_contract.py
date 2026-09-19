@@ -25,6 +25,7 @@ def test_default_lzt_pacing_matches_documented_base_and_search_limits():
     assert settings.AUTOBUY_PARALLEL_HTTP == 1
     assert settings.AUTOBUY_BURST_FIRST_WAVE == 1
     assert settings.AUTOBUY_MAX_HTTP_ATTEMPTS == 2
+    assert settings.AUTOBUY_MODE == "dry-run"
 
 
 def test_adaptive_limiter_waits_until_server_reset_after_quota_exhaustion():
