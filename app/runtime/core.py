@@ -719,7 +719,7 @@ def _build_source_info(src: dict) -> dict:
     }
 
 
-async def _fetch_source_items(src: dict):
+async def _fetch_source_items(src: dict, user_id: int):
     source_info = _build_source_info(src)
     items, err = await fetch_with_retry(source_info["url"], user_id=user_id)
     return source_info, items, err
@@ -733,7 +733,7 @@ async def fetch_all_sources(user_id: int):
     sources.sort(key=lambda s: (not bool(s.get("autobuy", False)), s.get("idx", 0)))
     items_with_sources = []
     errors = []
-    async for res in _run_bounded(sources, _fetch_source_items):
+    async for res in _run_bounded(sources, lambda src: _fetch_source_items(src, user_id)):
         if isinstance(res, Exception):
             errors.append(("UNKNOWN", "UNKNOWN", str(res)))
             continue
@@ -761,10 +761,10 @@ async def iter_sources_results_split(user_id: int, include_non_autobuy: bool):
     autobuy_sources = [s for s in sources if s.get("autobuy", False)]
     plain_sources = [s for s in sources if not s.get("autobuy", False)]
 
-    async for result in _run_bounded(autobuy_sources, _fetch_source_items):
+    async for result in _run_bounded(autobuy_sources, lambda src: _fetch_source_items(src, user_id)):
         yield result
     if include_non_autobuy:
-        async for result in _run_bounded(plain_sources, _fetch_source_items):
+        async for result in _run_bounded(plain_sources, lambda src: _fetch_source_items(src, user_id)):
             yield result
 
 
