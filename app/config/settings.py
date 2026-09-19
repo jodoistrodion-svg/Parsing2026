@@ -117,8 +117,7 @@ class Settings:
     autobuy_url_limit: int
     autobuy_max_http_attempts: int
     autobuy_parallel_http: int
-    autobuy_max_duration_sec: float
-    autobuy_total_retry_window_sec: float
+    autobuy_max_duration_sec: float    autobuy_total_retry_window_sec: float
     autobuy_burst_first_wave: int
     user_action_fetch_timeout: float
     search_min_request_interval: float
@@ -207,15 +206,15 @@ def load_settings() -> Settings:
         autobuy_queue_retry_max_delay=_float("AUTOBUY_QUEUE_RETRY_MAX_DELAY", default=0.18, minimum=0.0),
         fast_autobuy_timeout=_float("FAST_AUTOBUY_TIMEOUT", default=0.45, minimum=0.2),
         autobuy_url_limit=_int("AUTOBUY_URL_LIMIT", default=0, minimum=0),
-        autobuy_max_http_attempts=_int("AUTOBUY_MAX_HTTP_ATTEMPTS", default=0, minimum=0),
-        autobuy_parallel_http=_int("AUTOBUY_PARALLEL_HTTP", default=24, minimum=1),
+        autobuy_max_http_attempts=_int("AUTOBUY_MAX_HTTP_ATTEMPTS", default=2, minimum=0),
+        autobuy_parallel_http=_int("AUTOBUY_PARALLEL_HTTP", default=1, minimum=1),
         autobuy_max_duration_sec=_float("AUTOBUY_MAX_DURATION_SEC", default=2.8, minimum=0.0),
         autobuy_total_retry_window_sec=_float("AUTOBUY_TOTAL_RETRY_WINDOW_SEC", default=6.0, minimum=0.0),
-        autobuy_burst_first_wave=_int("AUTOBUY_BURST_FIRST_WAVE", default=24, minimum=1),
+        autobuy_burst_first_wave=_int("AUTOBUY_BURST_FIRST_WAVE", default=1, minimum=1),
         user_action_fetch_timeout=_float("USER_ACTION_FETCH_TIMEOUT", default=2.4, minimum=0.2),
-        search_min_request_interval=_float("SEARCH_MIN_REQUEST_INTERVAL", default=0.0, minimum=0.0),
-        other_min_request_interval=_float("OTHER_MIN_REQUEST_INTERVAL", default=0.0, minimum=0.0),
-        buy_min_request_interval=_float("BUY_MIN_REQUEST_INTERVAL", default=0.0, minimum=0.0),
+        search_min_request_interval=_float("SEARCH_MIN_REQUEST_INTERVAL", default=3.0, minimum=0.0),
+        other_min_request_interval=_float("OTHER_MIN_REQUEST_INTERVAL", default=0.2, minimum=0.0),
+        buy_min_request_interval=_float("BUY_MIN_REQUEST_INTERVAL", default=0.2, minimum=0.0),
         db_cleanup_interval_seconds=_int("DB_CLEANUP_INTERVAL_SECONDS", default=3600, minimum=60),
         seen_retention_days=_int("SEEN_RETENTION_DAYS", default=90, minimum=1),
         buy_attempt_retention_days=_int("BUY_ATTEMPT_RETENTION_DAYS", default=180, minimum=1),
@@ -317,8 +316,7 @@ def validate_runtime_config() -> None:
         errors.append("AUTOBUY_MODE must be 'live' or 'dry-run'")
     if LZT_BASE_URL not in {
         "https://api.lzt.market",
-        "https://prod-api.lzt.market",
-        "https://api.lolz.live",
+        "https://prod-api.lzt.market",        "https://api.lolz.live",
     }:
         errors.append("LZT_BASE_URL must point to an allowed LZT API host")
     if errors:
