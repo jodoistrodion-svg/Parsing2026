@@ -69,7 +69,7 @@ class UserAutobuyQueueManager:
             self._ensure_workers_locked(user_id, queue, handler)
             try:
                 queue.put_nowait(payload)
-        except asyncio.QueueFull:
+            except asyncio.QueueFull:
             METRICS.inc("autobuy_queue_rejected_total")
             logger.warning(
                 "AUTOBUY_QUEUE_FULL user_id=%s maxsize=%s",
