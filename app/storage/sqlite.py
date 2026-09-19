@@ -127,6 +127,17 @@ async def init_db():
         )
     """, commit=True)
 
+    await db_execute("""
+        CREATE TABLE IF NOT EXISTS access_codes (
+            code_hash TEXT PRIMARY KEY,
+            created_at INTEGER NOT NULL,
+            created_by INTEGER NOT NULL,
+            redeemed_by INTEGER,
+            redeemed_at INTEGER,
+            revoked_at INTEGER
+        )
+    """, commit=True)
+
     ucols = [row[1] for row in await db_fetchall("PRAGMA table_info(users)")]
     if "allowed" not in ucols:
         await db_execute("ALTER TABLE users ADD COLUMN allowed INTEGER DEFAULT 0", commit=True)
