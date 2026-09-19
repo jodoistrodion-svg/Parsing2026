@@ -506,7 +506,7 @@ def test_storage_schema_version_and_retention_cleanup(tmp_path):
         storage._db = None
         try:
             await storage.init_db()
-            assert await storage.db_get_schema_version() == 3
+            assert await storage.db_get_schema_version() == 5
             now = int(time.time())
             await storage.db_execute(
                 "INSERT OR REPLACE INTO seen(user_id, item_key, seen_at) VALUES (?, ?, ?)",
@@ -553,3 +553,66 @@ def test_autobuy_dry_run_is_explicit():
     finally:
         autobuy.AUTOBUY_MODE = original_mode
         autobuy.LZT_API_KEY = original_key
+
+
+def test_access_code_is_one_time_and_bound_to_one_user(tmp_path):
+    import app.storage.sqlite as storage
+    from access.licensing import issue_access_code, redeem_access_code, revoke_user_access
+
+    async def run():
+        original_db_file = storage.DB_FILE
+        original_db = storage._db
+        storage.DB_FILE = str(tmp_path / "license.sqlite")
+        storage._db = None
+        try:
+            await storage.init_db()
+            code = await issue_access_code(9001)
+            assert code.startswith("P26-")
+            assert len(code) == 31
+
+            results = await asyncio.gather(
+                redeem_access_code(1001, code),
+                redeem_access_code(1002, code),
+            )
+            assert sorted(results) == ["redeemed", "used"]
+
+            winner = 1001 if results[0] == "redeemed" else 1002
+            loser = 1002 if winner == 1001 else 1001
+            assert await storage.db_is_allowed(winner) is True
+            assert await storage.db_is_allowed(loser) is False
+
+            rows = await storage.db_fetchall(
+                "SELECT code_hash, redeemed_by, redeemed_at FROM access_codes"
+            )
+            assert len(rows) == 1
+            assert rows[0][0] != code
+            assert rows[0][1] == winner
+            assert rows[0][2] is not None
+
+            assert await redeem_access_code(winner, code) == "already_active"
+            assert await revoke_user_access(winner) == 1
+            assert await storage.db_is_allowed(winner) is False
+        finally:
+            await storage.db_close()
+            storage.DB_FILE = original_db_file
+            storage._db = original_db
+
+    asyncio.run(run())
+
+
+def test_access_code_normalization_and_invalid_input():
+    from access.licensing import generate_access_code, redeem_access_code
+
+    code = generate_access_code()
+    assert code == code.upper()
+    assert code.count("-") == 4
+    assert len(code) == 31
+
+    async def run():
+        try:
+            await redeem_access_code(123, "definitely-not-a-code")
+        except ValueError:
+            return True
+        return False
+
+    assert asyncio.run(run()) is True

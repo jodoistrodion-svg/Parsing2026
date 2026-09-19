@@ -127,6 +127,30 @@ async def init_db():
         )
     """, commit=True)
 
+    await db_execute("""
+        CREATE TABLE IF NOT EXISTS lzt_credentials (
+            user_id INTEGER PRIMARY KEY,
+            ciphertext TEXT NOT NULL,
+            key_version INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_verified_at INTEGER,
+            status TEXT NOT NULL DEFAULT 'active',
+            account_label TEXT NOT NULL DEFAULT ''
+        )
+    """, commit=True)
+
+    await db_execute("""
+        CREATE TABLE IF NOT EXISTS access_codes (
+            code_hash TEXT PRIMARY KEY,
+            created_at INTEGER NOT NULL,
+            created_by INTEGER NOT NULL,
+            redeemed_by INTEGER,
+            redeemed_at INTEGER,
+            revoked_at INTEGER
+        )
+    """, commit=True)
+
     ucols = [row[1] for row in await db_fetchall("PRAGMA table_info(users)")]
     if "allowed" not in ucols:
         await db_execute("ALTER TABLE users ADD COLUMN allowed INTEGER DEFAULT 0", commit=True)
@@ -147,7 +171,15 @@ async def init_db():
         "CREATE INDEX IF NOT EXISTS idx_buy_attempted_user_time ON buy_attempted(user_id, attempted_at)",
         commit=True,
     )
-    await db_execute("PRAGMA user_version = 3")
+    await db_execute(
+        "CREATE INDEX IF NOT EXISTS idx_access_codes_redeemed ON access_codes(redeemed_by, revoked_at)",
+        commit=True,
+    )
+    await db_execute(
+        "CREATE INDEX IF NOT EXISTS idx_access_codes_created ON access_codes(created_at DESC)",
+        commit=True,
+    )
+    await db_execute("PRAGMA user_version = 5", commit=True)
 
 
 async def db_ensure_user(user_id: int):
@@ -164,7 +196,153 @@ async def db_is_allowed(user_id: int) -> bool:
     if ACCESS_OPEN or user_id in OWNER_IDS:
         return True
     row = await db_fetchone("SELECT allowed FROM users WHERE user_id=?", (user_id,))
-    return bool(row[0]) if row else False
+    if row and bool(row[0]):
+        return True
+    license_row = await db_fetchone(
+        "SELECT 1 FROM access_codes WHERE redeemed_by=? AND revoked_at IS NULL LIMIT 1",
+        (user_id,),
+    )
+    return license_row is not None
+
+
+async def db_create_access_code(code_hash: str, created_by: int) -> bool:
+    db = await db_conn()
+    async with _db_lock:
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO access_codes(code_hash, created_at, created_by) VALUES (?, ?, ?)",
+            (code_hash, int(time.time()), created_by),
+        )
+        try:
+            changed = cur.rowcount
+        finally:
+            await cur.close()
+        await db.commit()
+        return changed == 1
+
+
+async def db_redeem_access_code(user_id: int, code_hash: str) -> str:
+    db = await db_conn()
+    async with _db_lock:
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            cur = await db.execute(
+                "SELECT redeemed_by, revoked_at FROM access_codes WHERE code_hash=?",
+                (code_hash,),
+            )
+            try:
+                row = await cur.fetchone()
+            finally:
+                await cur.close()
+
+            if row is None:
+                await db.rollback()
+                return "invalid"
+            if row[1] is not None:
+                await db.rollback()
+                return "revoked"
+            if row[0] is not None:
+                await db.rollback()
+                return "already_active" if int(row[0]) == user_id else "used"
+
+            active = await db.execute(
+                "SELECT 1 FROM access_codes WHERE redeemed_by=? AND revoked_at IS NULL LIMIT 1",
+                (user_id,),
+            )
+            try:
+                if await active.fetchone() is not None:
+                    await db.rollback()
+                    return "already_active"
+            finally:
+                await active.close()
+
+            await db.execute(
+                "INSERT OR IGNORE INTO users(user_id, role, allowed, last_error_report, last_request_ts) VALUES (?, ?, 0, 0, 0)",
+                (user_id, "customer"),
+            )
+            cur = await db.execute(
+                """
+                UPDATE access_codes
+                SET redeemed_by=?, redeemed_at=?
+                WHERE code_hash=? AND redeemed_by IS NULL AND revoked_at IS NULL
+                """,
+                (user_id, int(time.time()), code_hash),
+            )
+            try:
+                changed = cur.rowcount
+            finally:
+                await cur.close()
+
+            if changed != 1:
+                await db.rollback()
+                return "used"
+
+            await db.commit()
+            return "redeemed"
+        except Exception:
+            await db.rollback()
+            raise
+
+
+async def db_access_code_stats() -> dict[str, int]:
+    row = await db_fetchone(
+        """
+        SELECT
+            COUNT(1),
+            SUM(CASE WHEN redeemed_by IS NULL AND revoked_at IS NULL THEN 1 ELSE 0 END),
+            SUM(CASE WHEN redeemed_by IS NOT NULL AND revoked_at IS NULL THEN 1 ELSE 0 END),
+            SUM(CASE WHEN revoked_at IS NOT NULL THEN 1 ELSE 0 END)
+        FROM access_codes
+        """
+    )
+    if not row:
+        return {"total": 0, "unused": 0, "active": 0, "revoked": 0}
+    return {
+        "total": int(row[0] or 0),
+        "unused": int(row[1] or 0),
+        "active": int(row[2] or 0),
+        "revoked": int(row[3] or 0),
+    }
+
+
+async def db_list_access_codes(limit: int = 10):
+    rows = await db_fetchall(
+        """
+        SELECT created_at, created_by, redeemed_by, redeemed_at, revoked_at
+        FROM access_codes
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (max(1, min(int(limit), 50)),),
+    )
+    return [
+        {
+            "created_at": int(row[0]),
+            "created_by": int(row[1]),
+            "redeemed_by": int(row[2]) if row[2] is not None else None,
+            "redeemed_at": int(row[3]) if row[3] is not None else None,
+            "revoked_at": int(row[4]) if row[4] is not None else None,
+        }
+        for row in rows
+    ]
+
+
+async def db_revoke_access_for_user(user_id: int) -> int:
+    db = await db_conn()
+    async with _db_lock:
+        cur = await db.execute(
+            """
+            UPDATE access_codes
+            SET revoked_at=?
+            WHERE redeemed_by=? AND revoked_at IS NULL
+            """,
+            (int(time.time()), user_id),
+        )
+        try:
+            changed = cur.rowcount
+        finally:
+            await cur.close()
+        await db.commit()
+        return max(0, int(changed))
 
 
 async def db_toggle_allowed(target_user_id: int) -> bool:
@@ -376,3 +554,52 @@ async def db_cleanup(
         "seen_deleted": max(0, seen_deleted),
         "buy_attempted_deleted": max(0, attempted_deleted),
     }
+
+
+async def db_get_lzt_credential(user_id: int):
+    db = await db_conn()
+    async with _db_lock:
+        db.row_factory = aiosqlite.Row
+        try:
+            cur = await db.execute(
+                "SELECT user_id, ciphertext, key_version, created_at, updated_at, last_verified_at, status, account_label "
+                "FROM lzt_credentials WHERE user_id=?",
+                (int(user_id),),
+            )
+            row = await cur.fetchone()
+            await cur.close()
+            return row
+        finally:
+            db.row_factory = None
+
+
+async def db_upsert_lzt_credential(
+    user_id: int,
+    ciphertext: str,
+    now: int,
+    verified_at: int | None,
+    account_label: str,
+):
+    await db_execute(
+        """
+        INSERT INTO lzt_credentials(user_id, ciphertext, key_version, created_at, updated_at, last_verified_at, status, account_label)
+        VALUES (?, ?, 1, ?, ?, ?, 'active', ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            ciphertext=excluded.ciphertext,
+            key_version=excluded.key_version,
+            updated_at=excluded.updated_at,
+            last_verified_at=excluded.last_verified_at,
+            status='active',
+            account_label=excluded.account_label
+        """,
+        (int(user_id), ciphertext, int(now), int(now), verified_at, account_label),
+        commit=True,
+    )
+
+
+async def db_delete_lzt_credential(user_id: int):
+    await db_execute(
+        "DELETE FROM lzt_credentials WHERE user_id=?",
+        (int(user_id),),
+        commit=True,
+    )

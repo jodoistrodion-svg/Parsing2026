@@ -24,12 +24,13 @@ from app.config.settings import (
     SEARCH_MIN_REQUEST_INTERVAL,
 )
 from market.rate_limit import AdaptiveRateLimiter
+from app.services.credentials import get_lzt_token
 from metrics.events import METRICS
 
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 adaptive_rate_limiter = AdaptiveRateLimiter(safety_ms=5)
 _global_session: aiohttp.ClientSession | None = None
-_balance_cache = {"text": "—", "ts": 0.0}
+_balance_cache: dict[int | None, dict[str, object]] = {}
 
 
 class RequestRateLimiter:
@@ -95,6 +96,22 @@ def _default_api_headers() -> dict[str, str]:
     return headers
 
 
+
+
+async def _api_headers_for_user(user_id: int | None) -> dict[str, str]:
+    if user_id is None:
+        return _default_api_headers()
+    token = await get_lzt_token(int(user_id))
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; Parsing2026/3.x; +https://api.lzt.market/)",
+        "Referer": "https://zelenka.guru/",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 async def get_session():
     global _global_session
     if _global_session is None or _global_session.closed:
@@ -129,12 +146,15 @@ def _retry_after_seconds(headers) -> float | None:
             return None
 
 
-async def fetch_items_raw(url: str, request_timeout: float | None = None):
+async def fetch_items_raw(url: str, request_timeout: float | None = None, user_id: int | None = None):
     bucket, min_interval = _api_limit_bucket("GET", url)
-    await request_rate_limiter.wait(bucket, min_interval)
-    await adaptive_rate_limiter.before_request(bucket)
+    limiter_bucket = f"user:{user_id}:{bucket}" if user_id is not None else bucket
+    await request_rate_limiter.wait(limiter_bucket, min_interval)
+    await adaptive_rate_limiter.before_request(limiter_bucket)
 
-    headers = _default_api_headers()
+    headers = await _api_headers_for_user(user_id)
+    if user_id is not None and "Authorization" not in headers:
+        return None, "LZT API не подключён для этого пользователя", 0
     timeout_value = max(0.2, float(request_timeout if request_timeout is not None else FETCH_TIMEOUT))
 
     try:
@@ -142,7 +162,7 @@ async def fetch_items_raw(url: str, request_timeout: float | None = None):
         started = time.perf_counter()
         async with session.get(url, headers=headers, timeout=timeout_value) as resp:
             elapsed = int((time.perf_counter() - started) * 1000)
-            await adaptive_rate_limiter.observe(bucket, resp.headers)
+            await adaptive_rate_limiter.observe(limiter_bucket, resp.headers)
             METRICS.inc("market_requests_total", labels={"method": "GET", "bucket": bucket, "status": resp.status // 100})
             METRICS.observe("market_request_latency_ms", elapsed, labels={"bucket": bucket})
             body = await resp.text()
@@ -150,7 +170,7 @@ async def fetch_items_raw(url: str, request_timeout: float | None = None):
             if resp.status == 429:
                 retry_after = _retry_after_seconds(resp.headers)
                 if retry_after is not None:
-                    await adaptive_rate_limiter.note_retry_after(bucket, retry_after)
+                    await adaptive_rate_limiter.note_retry_after(limiter_bucket, retry_after)
                 return None, f"HTTP 429: {body[:300]}", resp.status
 
             if resp.status in (400, 401, 403, 404):
@@ -187,6 +207,7 @@ async def fetch_with_retry(
     url: str,
     max_retries: int = RETRY_MAX,
     request_timeout: float | None = None,
+    user_id: int | None = None,
 ):
     retries = max(0, int(max_retries))
     delay = max(0.0, RETRY_BASE_DELAY)
@@ -196,6 +217,7 @@ async def fetch_with_retry(
             items, err, status = await fetch_items_raw(
                 url,
                 request_timeout=request_timeout,
+                user_id=user_id,
             )
 
         if err is None:
@@ -227,9 +249,11 @@ def _format_money(v) -> str:
             return str(v)
 
 
-def invalidate_balance_cache() -> None:
-    _balance_cache["text"] = "—"
-    _balance_cache["ts"] = 0.0
+def invalidate_balance_cache(user_id: int | None = None) -> None:
+    if user_id is None:
+        _balance_cache.clear()
+        return
+    _balance_cache.pop(int(user_id), None)
 
 
 def _extract_account_buy_balance_text(data) -> str | None:
@@ -237,13 +261,7 @@ def _extract_account_buy_balance_text(data) -> str | None:
 
     def walk(obj):
         if isinstance(obj, dict):
-            title = str(
-                obj.get("title")
-                or obj.get("name")
-                or obj.get("label")
-                or obj.get("description")
-                or ""
-            ).strip()
+            title = str(obj.get("title") or obj.get("name") or obj.get("label") or obj.get("description") or "").strip()
             oid = obj.get("id")
             amount = obj.get("amount")
             balance = obj.get("balance")
@@ -257,7 +275,6 @@ def _extract_account_buy_balance_text(data) -> str | None:
                 walk(x)
 
     walk(data)
-
     for title, oid, value in candidates:
         low = title.lower()
         if "баланс для покупки аккаунтов" in low or "buy account" in low or "purchase account" in low:
@@ -267,7 +284,6 @@ def _extract_account_buy_balance_text(data) -> str | None:
             if value is not None:
                 parts.append(f"{_format_money(value)} ₽")
             return " • ".join(parts)
-
     for title, oid, value in candidates:
         if oid == LZT_BALANCE_ID:
             parts = [title]
@@ -276,45 +292,82 @@ def _extract_account_buy_balance_text(data) -> str | None:
             if value is not None:
                 parts.append(f"{_format_money(value)} ₽")
             return " • ".join(parts)
-
     return None
 
 
-async def get_account_buy_balance_text(force: bool = False) -> str:
-    cache = _balance_cache
+async def get_account_buy_balance_text(user_id: int | None = None, force: bool = False) -> str:
+    key = int(user_id) if user_id is not None else None
+    cache = _balance_cache.setdefault(key, {"text": "—", "ts": 0.0})
     now = time.time()
-    if not force and cache["text"] != "—" and now - cache["ts"] < BALANCE_CACHE_TTL:
-        return cache["text"]
+    if not force and cache["text"] != "—" and now - float(cache["ts"]) < BALANCE_CACHE_TTL:
+        return str(cache["text"])
 
-    if not LZT_API_KEY:
+    headers = await _api_headers_for_user(user_id)
+    if user_id is not None and "Authorization" not in headers:
+        return "🔴 LZT не подключён"
+    if user_id is None and "Authorization" not in headers:
         return "—"
 
-    headers = _default_api_headers()
     urls = [
         f"{LZT_BASE_URL}/balance/exchange",
         "https://prod-api.lzt.market/balance/exchange",
         "https://api.lzt.market/balance/exchange",
     ]
-
     session = await get_session()
     for url in urls:
         try:
             async with session.get(url, headers=headers, timeout=FETCH_TIMEOUT) as resp:
-                text = await resp.text()
+                body = await resp.text()
                 if resp.status != 200:
                     continue
                 try:
-                    data = json.loads(text)
+                    data = json.loads(body)
                 except Exception:
                     continue
                 parsed = _extract_account_buy_balance_text(data)
                 if parsed:
-                    _balance_cache["text"] = parsed
-                    _balance_cache["ts"] = now
+                    cache["text"] = parsed
+                    cache["ts"] = now
                     return parsed
         except Exception:
             continue
+    return str(cache["text"]) if cache["text"] != "—" else "—"
 
-    return cache["text"] if cache["text"] != "—" else "—"
 
-__all__ = [name for name in globals() if not name.startswith("__")]
+async def verify_lzt_token(token: str) -> tuple[bool, str]:
+    token = (token or "").strip()
+    if not token or len(token) > 4096:
+        return False, "Пустой или некорректный токен."
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; Parsing2026/3.x; +https://api.lzt.market/)",
+        "Referer": "https://zelenka.guru/",
+        "Authorization": f"Bearer {token}",
+    }
+    session = await get_session()
+    urls = [
+        f"{LZT_BASE_URL}/balance/exchange",
+        "https://prod-api.lzt.market/balance/exchange",
+        "https://api.lzt.market/balance/exchange",
+    ]
+    for url in urls:
+        try:
+            async with session.get(url, headers=headers, timeout=max(FETCH_TIMEOUT, 3.0)) as resp:
+                body = await resp.text()
+                if resp.status == 200:
+                    try:
+                        data = json.loads(body)
+                    except Exception:
+                        data = {}
+                    label = _extract_account_buy_balance_text(data) or "LZT подключён"
+                    return True, label
+                if resp.status in (401, 403):
+                    return False, "LZT отклонил токен (401/403)."
+        except (asyncio.TimeoutError, aiohttp.ClientError):
+            continue
+        except Exception:
+            continue
+    return False, "Не удалось проверить токен через LZT API."
+
+
+

@@ -81,6 +81,7 @@ class Settings:
     lzt_base_url: str
     lzt_balance_id: int
     lzt_secret_word: str
+    credential_encryption_key: str
     owner_id: int
     owner_ids: frozenset[int]
     access_mode: str
@@ -146,6 +147,7 @@ class Settings:
         data["api_token"] = "***" if self.api_token else ""
         data["lzt_api_key"] = "***" if self.lzt_api_key else ""
         data["lzt_secret_word"] = "***" if self.lzt_secret_word else ""
+        data["credential_encryption_key"] = "***" if self.credential_encryption_key else ""
         data["owner_ids"] = sorted(self.owner_ids)
         return data
 
@@ -168,6 +170,7 @@ def load_settings() -> Settings:
         lzt_base_url=_cfg("LZT_BASE_URL", default="https://api.lzt.market").rstrip("/"),
         lzt_balance_id=_int("LZT_BALANCE_ID", default=20212, minimum=1),
         lzt_secret_word=_cfg("LZT_SECRET_WORD"),
+        credential_encryption_key=_cfg("CREDENTIAL_ENCRYPTION_KEY"),
         owner_id=owner_id,
         owner_ids=owner_ids,
         access_mode=_cfg("ACCESS_MODE", default="closed").lower(),
@@ -236,6 +239,7 @@ LZT_API_KEY = settings.lzt_api_key
 LZT_BASE_URL = settings.lzt_base_url
 LZT_BALANCE_ID = settings.lzt_balance_id
 LZT_SECRET_WORD = settings.lzt_secret_word
+CREDENTIAL_ENCRYPTION_KEY = settings.credential_encryption_key
 OWNER_ID = settings.owner_id
 OWNER_IDS = set(settings.owner_ids)
 ACCESS_MODE = settings.access_mode

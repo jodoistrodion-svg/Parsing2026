@@ -18,8 +18,8 @@ from app.config.settings import (
     USER_PAGE_SIZE,
 )
 from app.runtime.core import (
-    START_MSG_1, START_MSG_2, build_urls_picker_kb, dp, get_user_hunter_start_lock,
-    kb_main, kb_request, kb_urls_menu, load_user_data, log_autobuy,
+    START_MSG_1, START_MSG_2, autobuy_queue_manager, build_urls_picker_kb, dp, get_user_hunter_start_lock,
+    kb_main, kb_request, kb_license_admin, kb_lzt_menu, kb_urls_menu, load_user_data, log_autobuy,
     parse_index_from_button, parse_user_id_from_button, safe_delete, sanitize_url_name,
     send_bot_message, send_screen, send_welcome_sticker, show_denied, show_status, _safe_compact,
     show_urls_list_screen, show_users_screen, user_buy_attempted, user_history_reset_pending,
@@ -35,8 +35,10 @@ from app.storage.sqlite import (
     db_remove_url, db_set_last_request_ts, db_set_url_autobuy, db_set_url_enabled,
     db_set_url_name, db_toggle_allowed,
 )
-from app.services.market_api import fetch_with_retry, invalidate_balance_cache
+from app.services.market_api import fetch_with_retry, invalidate_balance_cache, verify_lzt_token
 from market.normalize import normalize_url, validate_market_url
+from access.licensing import access_stats, issue_access_code, recent_access_codes, redeem_access_code, revoke_user_access
+from app.services.credentials import delete_lzt_token, has_lzt_token, lzt_credential_status, save_lzt_token
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
@@ -62,7 +64,7 @@ async def health_cmd(message: types.Message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     await load_user_data(user_id)
-    invalidate_balance_cache()
+    invalidate_balance_cache(user_id)
     await show_status(user_id, chat_id)
     await safe_delete(message)
 
@@ -90,6 +92,46 @@ async def buttons_handler(message: types.Message):
 
     allowed = await db_is_allowed(user_id)
     if not allowed and user_id not in OWNER_IDS:
+        if text == "🔑 Ввести код доступа":
+            user_modes[user_id] = "access_code_input"
+            await send_screen(
+                chat_id,
+                user_id,
+                "🔑 <b>Активация доступа</b>\n\n"
+                "Введи выданный тебе код. Код одноразовый и после активации "
+                "закрепляется за твоим Telegram ID.",
+                reply_markup=kb_request(),
+                parse_mode="HTML",
+            )
+            return await safe_delete(message)
+
+        if mode == "access_code_input":
+            try:
+                result = await redeem_access_code(user_id, text)
+            except ValueError:
+                result = "invalid"
+
+            if result == "redeemed":
+                user_modes[user_id] = None
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "✅ <b>Доступ активирован.</b>\n"
+                    "Код больше нельзя использовать другим Telegram ID.",
+                    reply_markup=kb_main(user_id),
+                    parse_mode="HTML",
+                )
+            elif result == "already_active":
+                user_modes[user_id] = None
+                await send_screen(chat_id, user_id, "ℹ️ У тебя уже есть активный доступ.", reply_markup=kb_main(user_id))
+            elif result == "used":
+                await send_screen(chat_id, user_id, "❌ Этот код уже использован.", reply_markup=kb_request())
+            elif result == "revoked":
+                await send_screen(chat_id, user_id, "❌ Этот код отозван.", reply_markup=kb_request())
+            else:
+                await send_screen(chat_id, user_id, "❌ Код недействителен. Проверь ввод и попробуй ещё раз.", reply_markup=kb_request())
+            return await safe_delete(message)
+
         if text == "🔓 Запрос на бота":
             now = int(time.time())
             last = await db_get_last_request_ts(user_id)
@@ -146,6 +188,241 @@ async def buttons_handler(message: types.Message):
             await send_screen(chat_id, user_id, title, reply_markup=kb)
             return await safe_delete(message)
 
+        if text == "🔑 Коды доступа" and user_id in OWNER_IDS:
+            stats = await access_stats()
+            user_modes[user_id] = "license_admin"
+            await send_screen(
+                chat_id,
+                user_id,
+                "🔑 <b>Коды доступа</b>\n"
+                f"• Всего создано: <b>{stats['total']}</b>\n"
+                f"• Не использовано: <b>{stats['unused']}</b>\n"
+                f"• Активно: <b>{stats['active']}</b>\n"
+                f"• Отозвано: <b>{stats['revoked']}</b>\n\n"
+                "Созданный код показывается только один раз.",
+                reply_markup=kb_license_admin(),
+                parse_mode="HTML",
+            )
+            return await safe_delete(message)
+
+        if text == "🔑 LZT API":
+            status = await lzt_credential_status(user_id)
+            if status["connected"]:
+                verified = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(status["verified_at"]))) if status["verified_at"] else "—"
+                body = (
+                    "🔑 <b>LZT API</b>\n\n"
+                    "🟢 Подключён\n"
+                    f"• Аккаунт: <b>{html.escape(str(status['account_label'] or 'не определён'))}</b>\n"
+                    f"• Последняя проверка: <code>{verified}</code>\n\n"
+                    "Токен хранится на сервере только в зашифрованном виде."
+                )
+            else:
+                body = (
+                    "🔑 <b>LZT API</b>\n\n"
+                    "🔴 Не подключён.\n\n"
+                    "Подключи свой LZT API token, чтобы поиск и автобай работали от имени именно твоего LZT-аккаунта."
+                )
+            user_modes[user_id] = "lzt_menu"
+            await send_screen(chat_id, user_id, body, reply_markup=kb_lzt_menu(), parse_mode="HTML")
+            return await safe_delete(message)
+    
+        if mode == "lzt_menu":
+            if text == "⬅️ Назад":
+                user_modes[user_id] = None
+                await send_screen(chat_id, user_id, "🧭 <b>Главное меню</b>", reply_markup=kb_main(user_id), parse_mode="HTML")
+                return await safe_delete(message)
+    
+            if text in {"🔗 Подключить / заменить", "🔄 Проверить"}:
+                if text == "🔄 Проверить":
+                    status = await lzt_credential_status(user_id)
+                    if not status["connected"]:
+                        await send_screen(chat_id, user_id, "🔴 LZT не подключён.", reply_markup=kb_lzt_menu())
+                    else:
+                        await send_screen(chat_id, user_id, "🔄 Проверяю подключение через LZT API…", reply_markup=kb_lzt_menu())
+                        from app.services.credentials import get_lzt_token
+                        token = await get_lzt_token(user_id)
+                        ok, label = await verify_lzt_token(token or "")
+                        if ok:
+                            await save_lzt_token(user_id, token or "", account_label=label, verified_at=int(time.time()))
+                            invalidate_balance_cache(user_id)
+                            await send_screen(chat_id, user_id, f"🟢 <b>LZT подключён</b>\n{html.escape(label)}", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                        else:
+                            await send_screen(chat_id, user_id, f"🔴 <b>Проверка не пройдена</b>\n{html.escape(label)}", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                    return await safe_delete(message)
+    
+                user_modes[user_id] = "lzt_token_input"
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "🔐 <b>Подключение LZT</b>\n\n"
+                    "Отправь свой LZT API token одним сообщением.\n"
+                    "После проверки сообщение будет удалено, а token сохранится на сервере только в зашифрованном виде.\n\n"
+                    "Никому не пересылай этот token.",
+                    reply_markup=kb_lzt_menu(),
+                    parse_mode="HTML",
+                )
+                return await safe_delete(message)
+    
+            if text == "🗑 Удалить подключение":
+                user_modes[user_id] = "lzt_delete_confirm"
+                await send_screen(chat_id, user_id, "⚠️ <b>Удалить LZT подключение?</b>\n\nЭто остановит дальнейшие запросы к LZT для твоего аккаунта.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                return await safe_delete(message)
+    
+        if mode == "lzt_delete_confirm":
+            if text == "⬅️ Назад":
+                user_modes[user_id] = "lzt_menu"
+                await send_screen(chat_id, user_id, "🔑 <b>LZT API</b>", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                return await safe_delete(message)
+            if text.lower() in {"да", "удалить", "🗑 удалить подключение"}:
+                await delete_lzt_token(user_id)
+                invalidate_balance_cache(user_id)
+                user_search_active[user_id] = False
+                user_hunter_mode[user_id] = "off"
+                task = user_hunter_tasks.get(user_id)
+                if task and not task.done():
+                    task.cancel()
+                user_hunter_tasks.pop(user_id, None)
+                await autobuy_queue_manager.stop_user(user_id, drain=False)
+                await send_screen(chat_id, user_id, "✅ LZT подключение удалено. Охотник остановлен.", reply_markup=kb_main(user_id))
+                user_modes[user_id] = None
+                return await safe_delete(message)
+            await send_screen(chat_id, user_id, "Напиши «удалить» для подтверждения или нажми ⬅️ Назад.", reply_markup=kb_lzt_menu())
+            return await safe_delete(message)
+    
+        if mode == "lzt_token_input":
+            token = text.strip()
+            if not token or len(token) > 4096 or "\n" in token or "\r" in token:
+                await send_screen(chat_id, user_id, "❌ Некорректный token.", reply_markup=kb_lzt_menu())
+                return await safe_delete(message)
+            await send_screen(chat_id, user_id, "🔄 Проверяю token через LZT API…", reply_markup=kb_lzt_menu())
+            ok, label = await verify_lzt_token(token)
+            if not ok:
+                user_modes[user_id] = "lzt_menu"
+                await send_screen(chat_id, user_id, f"❌ <b>Token не принят</b>\n{html.escape(label)}\n\nНичего не сохранено.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                return await safe_delete(message)
+            await autobuy_queue_manager.stop_user(user_id, drain=False)
+            user_search_active[user_id] = False
+            user_hunter_mode[user_id] = "off"
+            task = user_hunter_tasks.get(user_id)
+            if task and not task.done():
+                task.cancel()
+            user_hunter_tasks.pop(user_id, None)
+            await save_lzt_token(user_id, token, account_label=label, verified_at=int(time.time()))
+            invalidate_balance_cache(user_id)
+            user_modes[user_id] = "lzt_menu"
+            await send_screen(chat_id, user_id, f"✅ <b>LZT подключён</b>\n{html.escape(label)}\n\nToken сохранён за твоим Telegram ID.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+            return await safe_delete(message)
+    
+        if mode == "license_admin" and user_id in OWNER_IDS:
+            if text == "⬅️ Назад":
+                user_modes[user_id] = None
+                await send_screen(chat_id, user_id, "🧭 <b>Главное меню</b>", reply_markup=kb_main(user_id), parse_mode="HTML")
+                return await safe_delete(message)
+
+            if text == "➕ Создать код":
+                code = await issue_access_code(user_id)
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "🎟 <b>Новый код доступа</b>\n\n"
+                    f"<code>{html.escape(code)}</code>\n\n"
+                    "Передай этот код покупателю вручную.\n"
+                    "Код хранится в базе только в виде SHA-256 хеша и после активации "
+                    "навсегда привязывается к Telegram ID покупателя.",
+                    reply_markup=kb_license_admin(),
+                    parse_mode="HTML",
+                )
+                return await safe_delete(message)
+
+            if text == "📊 Статистика кодов":
+                stats = await access_stats()
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "📊 <b>Статистика кодов</b>\n"
+                    f"• Всего: <b>{stats['total']}</b>\n"
+                    f"• Не использовано: <b>{stats['unused']}</b>\n"
+                    f"• Активно: <b>{stats['active']}</b>\n"
+                    f"• Отозвано: <b>{stats['revoked']}</b>",
+                    reply_markup=kb_license_admin(),
+                    parse_mode="HTML",
+                )
+                return await safe_delete(message)
+
+            if text == "📋 Последние коды":
+                rows = await recent_access_codes(10)
+                if not rows:
+                    body = "📋 Кодов пока нет."
+                else:
+                    parts = ["📋 <b>Последние коды</b>"]
+                    for row in rows:
+                        if row["revoked_at"] is not None:
+                            status = "🚫 отозван"
+                        elif row["redeemed_by"] is not None:
+                            status = f"✅ активирован: <code>{row['redeemed_by']}</code>"
+                        else:
+                            status = "🟡 не использован"
+                        parts.append(f"• {status} | создан: <code>{row['created_by']}</code>")
+                    body = "\n".join(parts)
+                await send_screen(chat_id, user_id, body, reply_markup=kb_license_admin(), parse_mode="HTML")
+                return await safe_delete(message)
+
+            if text == "🚫 Отозвать по ID":
+                user_modes[user_id] = "license_revoke_user"
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "🚫 Введи Telegram ID пользователя, которому нужно отозвать активный доступ.",
+                    reply_markup=kb_license_admin(),
+                )
+                return await safe_delete(message)
+
+        if mode == "license_revoke_user" and user_id in OWNER_IDS:
+            if text == "⬅️ Назад":
+                user_modes[user_id] = "license_admin"
+                await send_screen(chat_id, user_id, "🔑 <b>Коды доступа</b>", reply_markup=kb_license_admin(), parse_mode="HTML")
+                return await safe_delete(message)
+
+            raw_target = text.strip()
+            if not raw_target.isdigit():
+                await send_screen(chat_id, user_id, "❌ Нужен числовой Telegram ID.", reply_markup=kb_license_admin())
+                return await safe_delete(message)
+
+            target_uid = int(raw_target)
+            if target_uid <= 0 or target_uid in OWNER_IDS:
+                await send_screen(chat_id, user_id, "❌ Этот ID нельзя обработать через отзыв лицензии.", reply_markup=kb_license_admin())
+                return await safe_delete(message)
+
+            revoked = await revoke_user_access(target_uid)
+            user_modes[user_id] = "license_admin"
+
+            if revoked:
+                # Revocation must terminate an already-running hunter immediately;
+                # access checks on future messages alone are not sufficient.
+                user_search_active[target_uid] = False
+                user_hunter_mode[target_uid] = "off"
+                target_task = user_hunter_tasks.get(target_uid)
+                if target_task and not target_task.done():
+                    target_task.cancel()
+                user_hunter_tasks.pop(target_uid, None)
+                await autobuy_queue_manager.stop_user(target_uid, drain=False)
+                log_autobuy(f"LICENSE_REVOKE user_id={target_uid} by_admin={user_id}")
+
+                try:
+                    await send_bot_message(
+                        target_uid,
+                        "🚫 Твой доступ к боту отозван владельцем. Активный охотник остановлен.",
+                    )
+                except Exception:
+                    pass
+
+                result_text = f"🚫 Доступ пользователя <code>{target_uid}</code> отозван. Лицензионных кодов: <b>{revoked}</b>."
+            else:
+                result_text = f"ℹ️ Активной лицензии для <code>{target_uid}</code> не найдено."
+
+            await send_screen(chat_id, user_id, result_text, reply_markup=kb_license_admin(), parse_mode="HTML")
+            return await safe_delete(message)
+
         if mode == "users_pick" and user_id in OWNER_IDS:
             if text == "⬅️ Назад":
                 user_modes[user_id] = None
@@ -185,7 +462,7 @@ async def buttons_handler(message: types.Message):
                 await send_screen(chat_id, user_id, f"❌ Достигнут лимит URL: {limit}", reply_markup=kb_urls_menu())
                 return await safe_delete(message)
 
-            _items, api_err = await fetch_with_retry(url, max_retries=4, request_timeout=max(FETCH_TIMEOUT, USER_ACTION_FETCH_TIMEOUT))
+            _items, api_err = await fetch_with_retry(url, max_retries=4, request_timeout=max(FETCH_TIMEOUT, USER_ACTION_FETCH_TIMEOUT), user_id=user_id)
             if api_err:
                 await send_screen(chat_id, user_id, f"❌ Не удалось проверить URL через API.\nПричина: {api_err}\n\nПопробуй ещё раз — теперь бот делает больше ретраев и ждёт ответ дольше.", reply_markup=kb_urls_menu())
                 return await safe_delete(message)
@@ -340,6 +617,9 @@ async def buttons_handler(message: types.Message):
             return await safe_delete(message)
 
         if text == "🚀 Старт охотника" or norm_cmd == "hunter_start":
+            if not await has_lzt_token(user_id):
+                await send_screen(chat_id, user_id, "🔴 Сначала подключи свой LZT API через кнопку 🔑 LZT API.\nБез персонального LZT token поиск и автобай не запускаются.", reply_markup=kb_main(user_id))
+                return await safe_delete(message)
             requested_mode = "classic"
             lock = get_user_hunter_start_lock(user_id)
             async with lock:
