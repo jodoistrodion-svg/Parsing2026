@@ -315,9 +315,7 @@ def validate_runtime_config() -> None:
         errors.append("LOG_FORMAT must be 'plain' or 'json'")
     if AUTOBUY_MODE not in {"live", "dry-run"}:
         errors.append("AUTOBUY_MODE must be 'live' or 'dry-run'")
-    if LZT_BASE_URL not in {
-        "https://api.lzt.market",
-    }:
+    if LZT_BASE_URL != "https://api.lzt.market":
         errors.append("LZT_BASE_URL must point to an allowed LZT API host")
     if errors:
         raise RuntimeError("; ".join(errors))
