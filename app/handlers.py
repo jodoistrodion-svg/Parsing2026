@@ -453,7 +453,7 @@ async def buttons_handler(message: types.Message):
                 await send_screen(chat_id, user_id, f"❌ Достигнут лимит URL: {limit}", reply_markup=kb_urls_menu())
                 return await safe_delete(message)
 
-            _items, api_err = await fetch_with_retry(url, max_retries=4, request_timeout=max(FETCH_TIMEOUT, USER_ACTION_FETCH_TIMEOUT))
+            _items, api_err = await fetch_with_retry(url, max_retries=4, request_timeout=max(FETCH_TIMEOUT, USER_ACTION_FETCH_TIMEOUT), user_id=user_id)
             if api_err:
                 await send_screen(chat_id, user_id, f"❌ Не удалось проверить URL через API.\nПричина: {api_err}\n\nПопробуй ещё раз — теперь бот делает больше ретраев и ждёт ответ дольше.", reply_markup=kb_urls_menu())
                 return await safe_delete(message)
