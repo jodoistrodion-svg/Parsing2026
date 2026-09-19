@@ -43,3 +43,11 @@ def test_adaptive_limiter_waits_until_server_reset_after_quota_exhaustion():
         return time.perf_counter() - started
 
     assert asyncio.run(run()) >= 0.04
+
+
+def test_fast_buy_payload_contract_requires_current_price():
+    from app.purchase import autobuy
+
+    assert autobuy._extract_item_price({"price": 12.34}) == 12.34
+    assert autobuy._extract_item_price({"amount": 12.34}) == 12.34
+    assert autobuy._extract_item_price({}) is None
