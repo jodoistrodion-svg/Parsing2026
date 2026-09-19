@@ -117,7 +117,8 @@ class Settings:
     autobuy_url_limit: int
     autobuy_max_http_attempts: int
     autobuy_parallel_http: int
-    autobuy_max_duration_sec: float    autobuy_total_retry_window_sec: float
+    autobuy_max_duration_sec: float
+    autobuy_total_retry_window_sec: float
     autobuy_burst_first_wave: int
     user_action_fetch_timeout: float
     search_min_request_interval: float
