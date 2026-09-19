@@ -25,7 +25,7 @@ from app.runtime.core import (
     user_hunter_interval, user_hunter_mode, user_hunter_tasks, user_notify_queues,
     user_notify_workers, user_search_active, user_seen_items, iter_sources_results_split,
 )
-from app.services.market_api import _api_limit_bucket, _default_api_headers, get_session, request_rate_limiter
+from app.services.market_api import _api_headers_for_user, _api_limit_bucket, get_session, request_rate_limiter
 from app.storage.sqlite import db_mark_buy_attempted, db_mark_seen_batch
 from bot.autobuy_strategy import build_buy_urls, prioritize_buy_urls
 from domain.decision import DecisionEngine
@@ -262,9 +262,11 @@ def _normalize_command_text(text: str) -> str:
     return ""
 
 
-async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None = None, max_duration_override: float | None = None):
-    if not LZT_API_KEY:
-        return False, "LZT_API_KEY не задан"
+async def _try_autobuy_once(user_id: int, source: dict, item: dict, found_perf: float | None = None, max_duration_override: float | None = None):
+    if AUTOBUY_MODE != "dry-run":
+        headers_probe = await _api_headers_for_user(user_id)
+        if "Authorization" not in headers_probe:
+            return False, "LZT API не подключён для этого пользователя"
 
     if AUTOBUY_MODE == "dry-run":
         METRICS.inc("autobuy_dry_run_total")
@@ -310,7 +312,9 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
     )
 
     session = await get_session()
-    common_headers = _default_api_headers()
+    common_headers = await _api_headers_for_user(user_id)
+    if "Authorization" not in common_headers:
+        return False, "LZT API не подключён для этого пользователя"
     headers_json = {**common_headers, "Content-Type": "application/json"}
     headers_form = {**common_headers, "Content-Type": "application/x-www-form-urlencoded"}
 
@@ -318,8 +322,9 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
         post_started = time.perf_counter()
         try:
             bucket, min_interval = _api_limit_bucket("POST", buy_url)
+            limiter_bucket = f"user:{user_id}:{bucket}"
 
-            await request_rate_limiter.wait(bucket, min_interval)
+            await request_rate_limiter.wait(limiter_bucket, min_interval)
             t4 = time.perf_counter()
             async with session.post(buy_url, headers=headers_json, json=payload, timeout=FAST_AUTOBUY_TIMEOUT) as resp:
                 body = await resp.text()
@@ -449,7 +454,7 @@ def _remaining_autobuy_window_sec(found_perf: float | None) -> float | None:
     return AUTOBUY_TOTAL_RETRY_WINDOW_SEC - elapsed
 
 
-async def try_autobuy_item(source: dict, item: dict, found_perf: float | None = None):
+async def try_autobuy_item(user_id: int, source: dict, item: dict, found_perf: float | None = None):
     item_key = make_item_key(item)
     lock = get_buy_lock(item_key)
 
@@ -495,7 +500,7 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
         user_buy_inflight[user_id].discard(item_key)
         return
     try:
-        bought, buy_info = await try_autobuy_item(source, item, found_perf=found_perf)
+        bought, buy_info = await try_autobuy_item(user_id, source, item, found_perf=found_perf)
         should_mark_attempt = _autobuy_should_mark_attempt(bought, str(buy_info))
         user_buy_inflight[user_id].discard(item_key)
         if should_mark_attempt and item_key not in user_buy_attempted[user_id]:
