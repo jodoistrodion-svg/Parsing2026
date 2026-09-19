@@ -183,7 +183,8 @@ def load_settings() -> Settings:
         log_level=_cfg("LOG_LEVEL", default="INFO").upper(),
         log_format=_cfg("LOG_FORMAT", default="plain").lower(),
         dry_run=_bool("DRY_RUN", default=False),
-        autobuy_mode=_cfg("AUTOBUY_MODE", default="dry-run" if _bool("DRY_RUN", default=False) else "live").lower(),
+        # Live purchasing must be an explicit operator choice; safe default is dry-run.
+        autobuy_mode=_cfg("AUTOBUY_MODE", default="dry-run").lower(),
         hunter_interval_base=_float("HUNTER_INTERVAL_BASE", default=0.02, minimum=0.0),
         fetch_timeout=_float("FETCH_TIMEOUT", default=1.20, minimum=0.2),
         buy_timeout=_float("BUY_TIMEOUT", default=0.32, minimum=0.0),
