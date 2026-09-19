@@ -3,10 +3,7 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 
-OFFICIAL_MARKET_API_BASES = (
-    "https://api.lzt.market",
-    "https://prod-api.lzt.market",
-)
+OFFICIAL_MARKET_API_BASE = "https://api.lzt.market"
 
 
 def _source_base(source_url: str) -> str:
@@ -23,10 +20,9 @@ def _source_base(source_url: str) -> str:
 
 
 def _ordered_bases(source_url: str) -> list[str]:
-    source_base = _source_base(source_url)
-    bases = [source_base] if source_base else []
-    bases.extend(base for base in OFFICIAL_MARKET_API_BASES if base not in bases)
-    return bases
+    # The public API contract documents api.lzt.market as the purchase host.
+    # Do not probe alternate/legacy hosts during a purchase attempt.
+    return [OFFICIAL_MARKET_API_BASE]
 
 
 def build_buy_urls(source_url: str, item_id: int) -> list[str]:
