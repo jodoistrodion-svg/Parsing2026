@@ -64,7 +64,7 @@ async def health_cmd(message: types.Message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     await load_user_data(user_id)
-    invalidate_balance_cache()
+    invalidate_balance_cache(user_id)
     await show_status(user_id, chat_id)
     await safe_delete(message)
 
@@ -608,6 +608,9 @@ async def buttons_handler(message: types.Message):
             return await safe_delete(message)
 
         if text == "🚀 Старт охотника" or norm_cmd == "hunter_start":
+            if not await has_lzt_token(user_id):
+                await send_screen(chat_id, user_id, "🔴 Сначала подключи свой LZT API через кнопку 🔑 LZT API.\nБез персонального LZT token поиск и автобай не запускаются.", reply_markup=kb_main(user_id))
+                return await safe_delete(message)
             requested_mode = "classic"
             lock = get_user_hunter_start_lock(user_id)
             async with lock:
