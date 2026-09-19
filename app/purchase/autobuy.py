@@ -469,7 +469,7 @@ async def try_autobuy_item(user_id: int, source: dict, item: dict, found_perf: f
             if max_attempt_window is not None and max_attempt_window <= 0:
                 return False, f"attempt={i}/{attempts_limit if attempts_limit is not None else '∞'} | autobuy_total_retry_window_exceeded"
 
-            bought, info = await _try_autobuy_once(source, item, found_perf=found_perf, max_duration_override=max_attempt_window)
+            bought, info = await _try_autobuy_once(user_id, source, item, found_perf=found_perf, max_duration_override=max_attempt_window)
             last_info = str(info)
             if bought:
                 total = attempts_limit if attempts_limit is not None else "∞"
