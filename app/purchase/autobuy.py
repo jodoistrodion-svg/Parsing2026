@@ -265,7 +265,7 @@ def _normalize_command_text(text: str) -> str:
     return ""
 
 
-async def _try_autobuy_once(user_id: int, source: dict, item: dict, found_perf: float | None = None, max_duration_override: float | None = None):
+async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None = None, max_duration_override: float | None = None, user_id: int | None = None):
     if AUTOBUY_MODE != "dry-run":
         headers_probe = await _api_headers_for_user(user_id)
         if "Authorization" not in headers_probe:
@@ -457,7 +457,7 @@ def _remaining_autobuy_window_sec(found_perf: float | None) -> float | None:
     return AUTOBUY_TOTAL_RETRY_WINDOW_SEC - elapsed
 
 
-async def try_autobuy_item(user_id: int, source: dict, item: dict, found_perf: float | None = None):
+async def try_autobuy_item(source: dict, item: dict, found_perf: float | None = None, user_id: int | None = None):
     item_key = make_item_key(item)
     lock = get_buy_lock(item_key)
 
@@ -472,7 +472,7 @@ async def try_autobuy_item(user_id: int, source: dict, item: dict, found_perf: f
             if max_attempt_window is not None and max_attempt_window <= 0:
                 return False, f"attempt={i}/{attempts_limit if attempts_limit is not None else '∞'} | autobuy_total_retry_window_exceeded"
 
-            bought, info = await _try_autobuy_once(user_id, source, item, found_perf=found_perf, max_duration_override=max_attempt_window)
+            bought, info = await _try_autobuy_once(source, item, found_perf=found_perf, max_duration_override=max_attempt_window, user_id=user_id)
             last_info = str(info)
             if bought:
                 total = attempts_limit if attempts_limit is not None else "∞"
@@ -503,7 +503,7 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
         user_buy_inflight[user_id].discard(item_key)
         return
     try:
-        bought, buy_info = await try_autobuy_item(user_id, source, item, found_perf=found_perf)
+        bought, buy_info = await try_autobuy_item(source, item, found_perf=found_perf, user_id=user_id)
         should_mark_attempt = _autobuy_should_mark_attempt(bought, str(buy_info))
         user_buy_inflight[user_id].discard(item_key)
         if should_mark_attempt and item_key not in user_buy_attempted[user_id]:
