@@ -454,7 +454,8 @@ def _remaining_autobuy_window_sec(found_perf: float | None) -> float | None:
 
 async def try_autobuy_item(source: dict, item: dict, found_perf: float | None = None, user_id: int | None = None):
     item_key = make_item_key(item)
-    lock = get_buy_lock(item_key)
+    scoped_item_key = f"user::{int(user_id) if user_id is not None else 0}::{item_key}"
+    lock = get_buy_lock(scoped_item_key)
 
     async with lock:
         attempts_limit = AUTOBUY_RETRY_ATTEMPTS if AUTOBUY_RETRY_ATTEMPTS > 0 else None
@@ -493,7 +494,8 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
     bought = False
     buy_info = "autobuy_not_started"
     should_mark_attempt = False
-    claimed = await purchase_idempotency.claim(item_key)
+    scoped_item_key = f"user::{int(user_id)}::{item_key}"
+    claimed = await purchase_idempotency.claim(scoped_item_key)
     if not claimed:
         user_buy_inflight[user_id].discard(item_key)
         return
@@ -509,7 +511,7 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
         buy_info = f"autobuy_runtime_error: {e}"
         log_autobuy(f"BUY_MARK_ERR user_id={user_id} item_key={item_key} err='{_safe_compact(str(e),220)}'")
     finally:
-        await purchase_idempotency.release(item_key)
+        await purchase_idempotency.release(scoped_item_key)
 
     dur_ms = int((time.perf_counter() - found_perf) * 1000)
     log_autobuy(f"BUY_T6_RESULT item_id={item_id} since_found_ms={dur_ms} bought={int(bool(bought))}")
