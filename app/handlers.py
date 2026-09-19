@@ -19,7 +19,7 @@ from app.config.settings import (
 )
 from app.runtime.core import (
     START_MSG_1, START_MSG_2, build_urls_picker_kb, dp, get_user_hunter_start_lock,
-    kb_main, kb_request, kb_urls_menu, load_user_data, log_autobuy,
+    kb_main, kb_request, kb_license_admin, kb_urls_menu, load_user_data, log_autobuy,
     parse_index_from_button, parse_user_id_from_button, safe_delete, sanitize_url_name,
     send_bot_message, send_screen, send_welcome_sticker, show_denied, show_status, _safe_compact,
     show_urls_list_screen, show_users_screen, user_buy_attempted, user_history_reset_pending,
@@ -37,6 +37,7 @@ from app.storage.sqlite import (
 )
 from app.services.market_api import fetch_with_retry, invalidate_balance_cache
 from market.normalize import normalize_url, validate_market_url
+from access.licensing import access_stats, issue_access_code, recent_access_codes, redeem_access_code, revoke_user_access
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
@@ -90,6 +91,46 @@ async def buttons_handler(message: types.Message):
 
     allowed = await db_is_allowed(user_id)
     if not allowed and user_id not in OWNER_IDS:
+        if text == "🔑 Ввести код доступа":
+            user_modes[user_id] = "access_code_input"
+            await send_screen(
+                chat_id,
+                user_id,
+                "🔑 <b>Активация доступа</b>\n\n"
+                "Введи выданный тебе код. Код одноразовый и после активации "
+                "закрепляется за твоим Telegram ID.",
+                reply_markup=kb_request(),
+                parse_mode="HTML",
+            )
+            return await safe_delete(message)
+
+        if mode == "access_code_input":
+            try:
+                result = await redeem_access_code(user_id, text)
+            except ValueError:
+                result = "invalid"
+
+            if result == "redeemed":
+                user_modes[user_id] = None
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "✅ <b>Доступ активирован.</b>\n"
+                    "Код больше нельзя использовать другим Telegram ID.",
+                    reply_markup=kb_main(user_id),
+                    parse_mode="HTML",
+                )
+            elif result == "already_active":
+                user_modes[user_id] = None
+                await send_screen(chat_id, user_id, "ℹ️ У тебя уже есть активный доступ.", reply_markup=kb_main(user_id))
+            elif result == "used":
+                await send_screen(chat_id, user_id, "❌ Этот код уже использован.", reply_markup=kb_request())
+            elif result == "revoked":
+                await send_screen(chat_id, user_id, "❌ Этот код отозван.", reply_markup=kb_request())
+            else:
+                await send_screen(chat_id, user_id, "❌ Код недействителен. Проверь ввод и попробуй ещё раз.", reply_markup=kb_request())
+            return await safe_delete(message)
+
         if text == "🔓 Запрос на бота":
             now = int(time.time())
             last = await db_get_last_request_ts(user_id)
@@ -144,6 +185,112 @@ async def buttons_handler(message: types.Message):
             }.get(ctx, "Выбери URL")
             user_modes[user_id] = ctx
             await send_screen(chat_id, user_id, title, reply_markup=kb)
+            return await safe_delete(message)
+
+        if text == "🔑 Коды доступа" and user_id in OWNER_IDS:
+            stats = await access_stats()
+            user_modes[user_id] = "license_admin"
+            await send_screen(
+                chat_id,
+                user_id,
+                "🔑 <b>Коды доступа</b>\n"
+                f"• Всего создано: <b>{stats['total']}</b>\n"
+                f"• Не использовано: <b>{stats['unused']}</b>\n"
+                f"• Активно: <b>{stats['active']}</b>\n"
+                f"• Отозвано: <b>{stats['revoked']}</b>\n\n"
+                "Созданный код показывается только один раз.",
+                reply_markup=kb_license_admin(),
+                parse_mode="HTML",
+            )
+            return await safe_delete(message)
+
+        if mode == "license_admin" and user_id in OWNER_IDS:
+            if text == "⬅️ Назад":
+                user_modes[user_id] = None
+                await send_screen(chat_id, user_id, "🧭 <b>Главное меню</b>", reply_markup=kb_main(user_id), parse_mode="HTML")
+                return await safe_delete(message)
+
+            if text == "➕ Создать код":
+                code = await issue_access_code(user_id)
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "🎟 <b>Новый код доступа</b>\n\n"
+                    f"<code>{html.escape(code)}</code>\n\n"
+                    "Передай этот код покупателю вручную.\n"
+                    "Код хранится в базе только в виде SHA-256 хеша и после активации "
+                    "навсегда привязывается к Telegram ID покупателя.",
+                    reply_markup=kb_license_admin(),
+                    parse_mode="HTML",
+                )
+                return await safe_delete(message)
+
+            if text == "📊 Статистика кодов":
+                stats = await access_stats()
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "📊 <b>Статистика кодов</b>\n"
+                    f"• Всего: <b>{stats['total']}</b>\n"
+                    f"• Не использовано: <b>{stats['unused']}</b>\n"
+                    f"• Активно: <b>{stats['active']}</b>\n"
+                    f"• Отозвано: <b>{stats['revoked']}</b>",
+                    reply_markup=kb_license_admin(),
+                    parse_mode="HTML",
+                )
+                return await safe_delete(message)
+
+            if text == "📋 Последние коды":
+                rows = await recent_access_codes(10)
+                if not rows:
+                    body = "📋 Кодов пока нет."
+                else:
+                    parts = ["📋 <b>Последние коды</b>"]
+                    for row in rows:
+                        if row["revoked_at"] is not None:
+                            status = "🚫 отозван"
+                        elif row["redeemed_by"] is not None:
+                            status = f"✅ активирован: <code>{row['redeemed_by']}</code>"
+                        else:
+                            status = "🟡 не использован"
+                        parts.append(f"• {status} | создан: <code>{row['created_by']}</code>")
+                    body = "\n".join(parts)
+                await send_screen(chat_id, user_id, body, reply_markup=kb_license_admin(), parse_mode="HTML")
+                return await safe_delete(message)
+
+            if text == "🚫 Отозвать по ID":
+                user_modes[user_id] = "license_revoke_user"
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "🚫 Введи Telegram ID пользователя, которому нужно отозвать активный доступ.",
+                    reply_markup=kb_license_admin(),
+                )
+                return await safe_delete(message)
+
+        if mode == "license_revoke_user" and user_id in OWNER_IDS:
+            if text == "⬅️ Назад":
+                user_modes[user_id] = "license_admin"
+                await send_screen(chat_id, user_id, "🔑 <b>Коды доступа</b>", reply_markup=kb_license_admin(), parse_mode="HTML")
+                return await safe_delete(message)
+
+            raw_target = text.strip()
+            if not raw_target.isdigit():
+                await send_screen(chat_id, user_id, "❌ Нужен числовой Telegram ID.", reply_markup=kb_license_admin())
+                return await safe_delete(message)
+
+            target_uid = int(raw_target)
+            if target_uid <= 0 or target_uid in OWNER_IDS:
+                await send_screen(chat_id, user_id, "❌ Этот ID нельзя обработать через отзыв лицензии.", reply_markup=kb_license_admin())
+                return await safe_delete(message)
+
+            revoked = await revoke_user_access(target_uid)
+            user_modes[user_id] = "license_admin"
+            if revoked:
+                result_text = f"🚫 Доступ пользователя <code>{target_uid}</code> отозван. Лицензионных кодов: <b>{revoked}</b>."
+            else:
+                result_text = f"ℹ️ Активной лицензии для <code>{target_uid}</code> не найдено."
+            await send_screen(chat_id, user_id, result_text, reply_markup=kb_license_admin(), parse_mode="HTML")
             return await safe_delete(message)
 
         if mode == "users_pick" and user_id in OWNER_IDS:
