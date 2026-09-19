@@ -128,6 +128,19 @@ async def init_db():
     """, commit=True)
 
     await db_execute("""
+        CREATE TABLE IF NOT EXISTS lzt_credentials (
+            user_id INTEGER PRIMARY KEY,
+            ciphertext TEXT NOT NULL,
+            key_version INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_verified_at INTEGER,
+            status TEXT NOT NULL DEFAULT 'active',
+            account_label TEXT NOT NULL DEFAULT ''
+        )
+    """, commit=True)
+
+    await db_execute("""
         CREATE TABLE IF NOT EXISTS access_codes (
             code_hash TEXT PRIMARY KEY,
             created_at INTEGER NOT NULL,
@@ -166,7 +179,7 @@ async def init_db():
         "CREATE INDEX IF NOT EXISTS idx_access_codes_created ON access_codes(created_at DESC)",
         commit=True,
     )
-    await db_execute("PRAGMA user_version = 4", commit=True)
+    await db_execute("PRAGMA user_version = 5", commit=True)
 
 
 async def db_ensure_user(user_id: int):
@@ -541,3 +554,52 @@ async def db_cleanup(
         "seen_deleted": max(0, seen_deleted),
         "buy_attempted_deleted": max(0, attempted_deleted),
     }
+
+
+async def db_get_lzt_credential(user_id: int):
+    db = await db_conn()
+    async with _db_lock:
+        db.row_factory = aiosqlite.Row
+        try:
+            cur = await db.execute(
+                "SELECT user_id, ciphertext, key_version, created_at, updated_at, last_verified_at, status, account_label "
+                "FROM lzt_credentials WHERE user_id=?",
+                (int(user_id),),
+            )
+            row = await cur.fetchone()
+            await cur.close()
+            return row
+        finally:
+            db.row_factory = None
+
+
+async def db_upsert_lzt_credential(
+    user_id: int,
+    ciphertext: str,
+    now: int,
+    verified_at: int | None,
+    account_label: str,
+):
+    await db_execute(
+        """
+        INSERT INTO lzt_credentials(user_id, ciphertext, key_version, created_at, updated_at, last_verified_at, status, account_label)
+        VALUES (?, ?, 1, ?, ?, ?, 'active', ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            ciphertext=excluded.ciphertext,
+            key_version=excluded.key_version,
+            updated_at=excluded.updated_at,
+            last_verified_at=excluded.last_verified_at,
+            status='active',
+            account_label=excluded.account_label
+        """,
+        (int(user_id), ciphertext, int(now), int(now), verified_at, account_label),
+        commit=True,
+    )
+
+
+async def db_delete_lzt_credential(user_id: int):
+    await db_execute(
+        "DELETE FROM lzt_credentials WHERE user_id=?",
+        (int(user_id),),
+        commit=True,
+    )
