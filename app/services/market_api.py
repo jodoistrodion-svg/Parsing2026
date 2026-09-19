@@ -5,7 +5,7 @@ import json
 import random
 import time
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import aiohttp
 
@@ -64,9 +64,14 @@ def _is_search_endpoint(url: str) -> bool:
 
     if path.startswith("/category/"):
         return True
-    if path in ("/steam", "/fortnite", "/valorant", "/mihoyo", "/epicgames"):
+    if path in ("/steam", "/fortnite", "/valorant", "/mihoyo", "/epicgames", "/riot"):
         return True
-    return False
+    # Normalized category URLs carry order_by. Treat those as search traffic
+    # even when a newly added LZT category is not in the static list yet.
+    try:
+        return any(key.lower() == "order_by" for key, _ in parse_qsl(urlsplit(url).query, keep_blank_values=True))
+    except Exception:
+        return False
 
 
 def _is_buy_endpoint(url: str) -> bool:
