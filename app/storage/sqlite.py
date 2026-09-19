@@ -166,7 +166,7 @@ async def init_db():
         "CREATE INDEX IF NOT EXISTS idx_access_codes_created ON access_codes(created_at DESC)",
         commit=True,
     )
-    await db_execute("PRAGMA user_version = 4")
+    await db_execute("PRAGMA user_version = 4", commit=True)
 
 
 async def db_ensure_user(user_id: int):
