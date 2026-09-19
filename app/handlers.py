@@ -206,105 +206,105 @@ async def buttons_handler(message: types.Message):
             return await safe_delete(message)
 
         if text == "🔑 LZT API":
-        status = await lzt_credential_status(user_id)
-        if status["connected"]:
-            verified = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(status["verified_at"]))) if status["verified_at"] else "—"
-            body = (
-                "🔑 <b>LZT API</b>\n\n"
-                "🟢 Подключён\n"
-                f"• Аккаунт: <b>{html.escape(str(status['account_label'] or 'не определён'))}</b>\n"
-                f"• Последняя проверка: <code>{verified}</code>\n\n"
-                "Токен хранится на сервере только в зашифрованном виде."
-            )
-        else:
-            body = (
-                "🔑 <b>LZT API</b>\n\n"
-                "🔴 Не подключён.\n\n"
-                "Подключи свой LZT API token, чтобы поиск и автобай работали от имени именно твоего LZT-аккаунта."
-            )
-        user_modes[user_id] = "lzt_menu"
-        await send_screen(chat_id, user_id, body, reply_markup=kb_lzt_menu(), parse_mode="HTML")
-        return await safe_delete(message)
-
-    if mode == "lzt_menu":
-        if text == "⬅️ Назад":
-            user_modes[user_id] = None
-            await send_screen(chat_id, user_id, "🧭 <b>Главное меню</b>", reply_markup=kb_main(user_id), parse_mode="HTML")
+            status = await lzt_credential_status(user_id)
+            if status["connected"]:
+                verified = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(status["verified_at"]))) if status["verified_at"] else "—"
+                body = (
+                    "🔑 <b>LZT API</b>\n\n"
+                    "🟢 Подключён\n"
+                    f"• Аккаунт: <b>{html.escape(str(status['account_label'] or 'не определён'))}</b>\n"
+                    f"• Последняя проверка: <code>{verified}</code>\n\n"
+                    "Токен хранится на сервере только в зашифрованном виде."
+                )
+            else:
+                body = (
+                    "🔑 <b>LZT API</b>\n\n"
+                    "🔴 Не подключён.\n\n"
+                    "Подключи свой LZT API token, чтобы поиск и автобай работали от имени именно твоего LZT-аккаунта."
+                )
+            user_modes[user_id] = "lzt_menu"
+            await send_screen(chat_id, user_id, body, reply_markup=kb_lzt_menu(), parse_mode="HTML")
             return await safe_delete(message)
-
-        if text in {"🔗 Подключить / заменить", "🔄 Проверить"}:
-            if text == "🔄 Проверить":
-                status = await lzt_credential_status(user_id)
-                if not status["connected"]:
-                    await send_screen(chat_id, user_id, "🔴 LZT не подключён.", reply_markup=kb_lzt_menu())
-                else:
-                    await send_screen(chat_id, user_id, "🔄 Проверяю подключение через LZT API…", reply_markup=kb_lzt_menu())
-                    from app.services.credentials import get_lzt_token
-                    token = await get_lzt_token(user_id)
-                    ok, label = await verify_lzt_token(token or "")
-                    if ok:
-                        await save_lzt_token(user_id, token or "", account_label=label, verified_at=int(time.time()))
-                        invalidate_balance_cache(user_id)
-                        await send_screen(chat_id, user_id, f"🟢 <b>LZT подключён</b>\n{html.escape(label)}", reply_markup=kb_lzt_menu(), parse_mode="HTML")
-                    else:
-                        await send_screen(chat_id, user_id, f"🔴 <b>Проверка не пройдена</b>\n{html.escape(label)}", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+    
+        if mode == "lzt_menu":
+            if text == "⬅️ Назад":
+                user_modes[user_id] = None
+                await send_screen(chat_id, user_id, "🧭 <b>Главное меню</b>", reply_markup=kb_main(user_id), parse_mode="HTML")
                 return await safe_delete(message)
-
-            user_modes[user_id] = "lzt_token_input"
-            await send_screen(
-                chat_id,
-                user_id,
-                "🔐 <b>Подключение LZT</b>\n\n"
-                "Отправь свой LZT API token одним сообщением.\n"
-                "После проверки сообщение будет удалено, а token сохранится на сервере только в зашифрованном виде.\n\n"
-                "Никому не пересылай этот token.",
-                reply_markup=kb_lzt_menu(),
-                parse_mode="HTML",
-            )
+    
+            if text in {"🔗 Подключить / заменить", "🔄 Проверить"}:
+                if text == "🔄 Проверить":
+                    status = await lzt_credential_status(user_id)
+                    if not status["connected"]:
+                        await send_screen(chat_id, user_id, "🔴 LZT не подключён.", reply_markup=kb_lzt_menu())
+                    else:
+                        await send_screen(chat_id, user_id, "🔄 Проверяю подключение через LZT API…", reply_markup=kb_lzt_menu())
+                        from app.services.credentials import get_lzt_token
+                        token = await get_lzt_token(user_id)
+                        ok, label = await verify_lzt_token(token or "")
+                        if ok:
+                            await save_lzt_token(user_id, token or "", account_label=label, verified_at=int(time.time()))
+                            invalidate_balance_cache(user_id)
+                            await send_screen(chat_id, user_id, f"🟢 <b>LZT подключён</b>\n{html.escape(label)}", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                        else:
+                            await send_screen(chat_id, user_id, f"🔴 <b>Проверка не пройдена</b>\n{html.escape(label)}", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                    return await safe_delete(message)
+    
+                user_modes[user_id] = "lzt_token_input"
+                await send_screen(
+                    chat_id,
+                    user_id,
+                    "🔐 <b>Подключение LZT</b>\n\n"
+                    "Отправь свой LZT API token одним сообщением.\n"
+                    "После проверки сообщение будет удалено, а token сохранится на сервере только в зашифрованном виде.\n\n"
+                    "Никому не пересылай этот token.",
+                    reply_markup=kb_lzt_menu(),
+                    parse_mode="HTML",
+                )
+                return await safe_delete(message)
+    
+            if text == "🗑 Удалить подключение":
+                user_modes[user_id] = "lzt_delete_confirm"
+                await send_screen(chat_id, user_id, "⚠️ <b>Удалить LZT подключение?</b>\n\nЭто остановит дальнейшие запросы к LZT для твоего аккаунта.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                return await safe_delete(message)
+    
+        if mode == "lzt_delete_confirm":
+            if text == "⬅️ Назад":
+                user_modes[user_id] = "lzt_menu"
+                await send_screen(chat_id, user_id, "🔑 <b>LZT API</b>", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                return await safe_delete(message)
+            if text.lower() in {"да", "удалить", "🗑 удалить подключение"}:
+                await delete_lzt_token(user_id)
+                invalidate_balance_cache(user_id)
+                user_search_active[user_id] = False
+                user_hunter_mode[user_id] = "off"
+                task = user_hunter_tasks.get(user_id)
+                if task and not task.done():
+                    task.cancel()
+                user_hunter_tasks.pop(user_id, None)
+                await send_screen(chat_id, user_id, "✅ LZT подключение удалено. Охотник остановлен.", reply_markup=kb_main(user_id))
+                user_modes[user_id] = None
+                return await safe_delete(message)
+            await send_screen(chat_id, user_id, "Напиши «удалить» для подтверждения или нажми ⬅️ Назад.", reply_markup=kb_lzt_menu())
             return await safe_delete(message)
-
-        if text == "🗑 Удалить подключение":
-            user_modes[user_id] = "lzt_delete_confirm"
-            await send_screen(chat_id, user_id, "⚠️ <b>Удалить LZT подключение?</b>\n\nЭто остановит дальнейшие запросы к LZT для твоего аккаунта.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
-            return await safe_delete(message)
-
-    if mode == "lzt_delete_confirm":
-        if text == "⬅️ Назад":
-            user_modes[user_id] = "lzt_menu"
-            await send_screen(chat_id, user_id, "🔑 <b>LZT API</b>", reply_markup=kb_lzt_menu(), parse_mode="HTML")
-            return await safe_delete(message)
-        if text.lower() in {"да", "удалить", "🗑 удалить подключение"}:
-            await delete_lzt_token(user_id)
+    
+        if mode == "lzt_token_input":
+            token = text.strip()
+            if not token or len(token) > 4096 or "\n" in token or "\r" in token:
+                await send_screen(chat_id, user_id, "❌ Некорректный token.", reply_markup=kb_lzt_menu())
+                return await safe_delete(message)
+            await send_screen(chat_id, user_id, "🔄 Проверяю token через LZT API…", reply_markup=kb_lzt_menu())
+            ok, label = await verify_lzt_token(token)
+            if not ok:
+                user_modes[user_id] = "lzt_menu"
+                await send_screen(chat_id, user_id, f"❌ <b>Token не принят</b>\n{html.escape(label)}\n\nНичего не сохранено.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+                return await safe_delete(message)
+            await save_lzt_token(user_id, token, account_label=label, verified_at=int(time.time()))
             invalidate_balance_cache(user_id)
-            user_search_active[user_id] = False
-            user_hunter_mode[user_id] = "off"
-            task = user_hunter_tasks.get(user_id)
-            if task and not task.done():
-                task.cancel()
-            user_hunter_tasks.pop(user_id, None)
-            await send_screen(chat_id, user_id, "✅ LZT подключение удалено. Охотник остановлен.", reply_markup=kb_main(user_id))
-            user_modes[user_id] = None
-            return await safe_delete(message)
-        await send_screen(chat_id, user_id, "Напиши «удалить» для подтверждения или нажми ⬅️ Назад.", reply_markup=kb_lzt_menu())
-        return await safe_delete(message)
-
-    if mode == "lzt_token_input":
-        token = text.strip()
-        if not token or len(token) > 4096 or "\n" in token or "\r" in token:
-            await send_screen(chat_id, user_id, "❌ Некорректный token.", reply_markup=kb_lzt_menu())
-            return await safe_delete(message)
-        await send_screen(chat_id, user_id, "🔄 Проверяю token через LZT API…", reply_markup=kb_lzt_menu())
-        ok, label = await verify_lzt_token(token)
-        if not ok:
             user_modes[user_id] = "lzt_menu"
-            await send_screen(chat_id, user_id, f"❌ <b>Token не принят</b>\n{html.escape(label)}\n\nНичего не сохранено.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
+            await send_screen(chat_id, user_id, f"✅ <b>LZT подключён</b>\n{html.escape(label)}\n\nToken сохранён за твоим Telegram ID.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
             return await safe_delete(message)
-        await save_lzt_token(user_id, token, account_label=label, verified_at=int(time.time()))
-        invalidate_balance_cache(user_id)
-        user_modes[user_id] = "lzt_menu"
-        await send_screen(chat_id, user_id, f"✅ <b>LZT подключён</b>\n{html.escape(label)}\n\nToken сохранён за твоим Telegram ID.", reply_markup=kb_lzt_menu(), parse_mode="HTML")
-        return await safe_delete(message)
-
+    
     if mode == "license_admin" and user_id in OWNER_IDS:
             if text == "⬅️ Назад":
                 user_modes[user_id] = None
