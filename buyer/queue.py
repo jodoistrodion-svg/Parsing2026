@@ -42,17 +42,21 @@ class UserAutobuyQueueManager:
             self._queues[user_id] = queue
         return queue
 
+    def _ensure_workers_locked(self, user_id: int, queue: asyncio.Queue[Any], handler: JobHandler) -> None:
+        workers = [task for task in self._workers.get(user_id, []) if not task.done()]
+        self._workers[user_id] = workers
+        missing = max(0, self._workers_per_user - len(workers))
+        for worker_index in range(missing):
+            task = asyncio.create_task(
+                self._worker_loop(user_id, queue, handler),
+                name=f"autobuy-worker:{user_id}:{len(workers) + worker_index}",
+            )
+            workers.append(task)
+
     async def ensure_worker(self, user_id: int, handler: JobHandler) -> None:
         async with self._lock:
-            workers = [task for task in self._workers.get(user_id, []) if not task.done()]
-            self._workers[user_id] = workers
-            missing = max(0, self._workers_per_user - len(workers))
-            for worker_index in range(missing):
-                task = asyncio.create_task(
-                    self._worker_loop(user_id, handler),
-                    name=f"autobuy-worker:{user_id}:{len(workers) + worker_index}",
-                )
-                workers.append(task)
+            queue = self._get_queue(user_id)
+            self._ensure_workers_locked(user_id, queue, handler)
 
     async def enqueue(
         self,
@@ -60,10 +64,11 @@ class UserAutobuyQueueManager:
         payload: Any,
         handler: JobHandler,
     ) -> bool:
-        await self.ensure_worker(user_id, handler)
-        queue = self._get_queue(user_id)
-        try:
-            queue.put_nowait(payload)
+        async with self._lock:
+            queue = self._get_queue(user_id)
+            self._ensure_workers_locked(user_id, queue, handler)
+            try:
+                queue.put_nowait(payload)
         except asyncio.QueueFull:
             METRICS.inc("autobuy_queue_rejected_total")
             logger.warning(
@@ -119,8 +124,7 @@ class UserAutobuyQueueManager:
             if uid in self._queues
         ]
 
-    async def _worker_loop(self, user_id: int, handler: JobHandler) -> None:
-        queue = self._get_queue(user_id)
+    async def _worker_loop(self, user_id: int, queue: asyncio.Queue[Any], handler: JobHandler) -> None:
         while True:
             try:
                 payload = await queue.get()
