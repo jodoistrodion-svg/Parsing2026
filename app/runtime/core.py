@@ -143,6 +143,16 @@ def kb_main(user_id: int) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
+def kb_lzt_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [kb_button("🔗 Подключить / заменить"), kb_button("🔄 Проверить")],
+            [kb_button("🗑 Удалить подключение"), kb_button("⬅️ Назад")],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def kb_urls_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
