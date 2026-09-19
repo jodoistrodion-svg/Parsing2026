@@ -294,12 +294,20 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
     if not buy_urls:
         return False, "buy_url_not_found"
 
+    lot_price = _extract_item_price(item)
+    if lot_price in (None, "", "—"):
+        return False, "missing_item_price"
+    try:
+        lot_price = float(lot_price)
+    except (TypeError, ValueError):
+        return False, f"invalid_item_price={lot_price!r}"
+    if lot_price < 0:
+        return False, f"invalid_item_price={lot_price!r}"
+
     payload = {
+        "price": lot_price,
         "balance_id": LZT_BALANCE_ID,
-        "buy_without_validation": 1,
     }
-    if LZT_SECRET_WORD:
-        payload["secret_answer"] = LZT_SECRET_WORD
 
     since_found_ms = None
     if found_perf is not None:
@@ -311,7 +319,8 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
 
     log_autobuy(
         f"BUY_START item_id={item_id} src='{_safe_compact(source_name,120)}' "
-        f"since_found_ms={since_found_ms} urls={len(attempt_urls)} parallel={parallel_requests} buy_without_validation=1"
+        f"since_found_ms={since_found_ms} urls={len(attempt_urls)} parallel={parallel_requests} "
+        f"price={lot_price} balance_id={LZT_BALANCE_ID}"
     )
 
     session = await get_session()
@@ -319,7 +328,6 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
     if "Authorization" not in common_headers:
         return False, "LZT API не подключён для этого пользователя"
     headers_json = {**common_headers, "Content-Type": "application/json"}
-    headers_form = {**common_headers, "Content-Type": "application/x-www-form-urlencoded"}
 
     async def _post_buy(idx: int, buy_url: str):
         post_started = time.perf_counter()
@@ -332,24 +340,11 @@ async def _try_autobuy_once(source: dict, item: dict, found_perf: float | None =
             async with session.post(buy_url, headers=headers_json, json=payload, timeout=FAST_AUTOBUY_TIMEOUT) as resp:
                 body = await resp.text()
                 t5 = time.perf_counter()
-                state, info, force_form = _autobuy_classify_response(resp.status, body)
+                state, info, _force_form = _autobuy_classify_response(resp.status, body)
                 log_autobuy(
                     f"BUY_DIRECT item_id={item_id} attempt={idx}/{len(attempt_urls)} "
                     f"status={resp.status} state={state} mode=json url={buy_url} post_ms={int((t5-t4)*1000)} total_ms={int((t5-post_started)*1000)} info='{_safe_compact(info,220)}'"
                 )
-
-            if force_form:
-                # Фолбэк формой запускаем сразу, без дополнительной паузы,
-                # чтобы не терять драгоценные миллисекунды на hot-path автобая.
-                async with session.post(buy_url, headers=headers_form, data=payload, timeout=FAST_AUTOBUY_TIMEOUT) as resp_form:
-                    body_form = await resp_form.text()
-                    t5_form = time.perf_counter()
-                    state_form, info_form, _ = _autobuy_classify_response(resp_form.status, body_form)
-                    log_autobuy(
-                        f"BUY_DIRECT item_id={item_id} attempt={idx}/{len(attempt_urls)} "
-                        f"status={resp_form.status} state={state_form} mode=form url={buy_url} post_ms={int((t5_form-t4)*1000)} total_ms={int((t5_form-post_started)*1000)} info='{_safe_compact(info_form,220)}'"
-                    )
-                    return idx, buy_url, resp_form.status, state_form, info_form
 
             return idx, buy_url, resp.status, state, info
         except asyncio.TimeoutError:
@@ -518,142 +513,3 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
 
     dur_ms = int((time.perf_counter() - found_perf) * 1000)
     log_autobuy(f"BUY_T6_RESULT item_id={item_id} since_found_ms={dur_ms} bought={int(bool(bought))}")
-    bought_link = item.get("url") or item.get("link") or (f"https://lzt.market/{item_id}" if item_id is not None else "")
-    lot_price = _extract_item_price(item)
-    lot_time = _format_item_time_human(_extract_item_time(item))
-    now_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    result_emoji = "🧪" if (bought and AUTOBUY_MODE == "dry-run") else "✅" if bought else "❌"
-    result_word = "Симуляция" if (bought and AUTOBUY_MODE == "dry-run") else "Успех" if bought else "Ошибка"
-    buy_result_text = (
-        f"🛒 <b>Автобай {result_emoji}</b> [{html.escape(src_name)}]\n"
-        f"📌 Статус: <b>{result_word}</b>\n"
-        f"🆔 item_id: <code>{html.escape(str(item_id))}</code>\n"
-        f"⏱ Время покупки: <b>{html.escape(now_text)}</b>\n"
-        f"⚡ Задержка после обнаружения: <b>{dur_ms}ms</b>\n"
-        f"💰 Цена: <b>{html.escape(_format_value(lot_price) if lot_price is not None else '—')} ₽</b>\n"
-        f"🕒 Время лота: <b>{html.escape(lot_time)}</b>\n"
-        f"🔗 Лот: {html.escape(str(bought_link))}\n"
-        f"ℹ️ Детали: {html.escape(_sanitize_buy_info_for_user(str(buy_info)))}"
-    )
-
-    log_autobuy(
-        f"BUY_RESULT user_id={user_id} item_key={item_key} bought={int(bool(bought))} "
-        f"persist_attempt={int(bool(should_mark_attempt))} info='{_safe_compact(str(buy_info),240)}'"
-    )
-
-    await _send_buy_result_immediately(chat_id, user_id, buy_result_text)
-
-
-async def _autobuy_queue_handler(user_id: int, payload: tuple[int, dict, dict, float]):
-    chat_id, source, item, found_perf = payload
-    await _run_autobuy_and_notify(user_id, chat_id, source, item, found_perf)
-
-
-
-
-async def _mark_seen_and_batch(key: str, user_id: int, seen_batch: list[str]):
-    user_seen_items[user_id].add(key)
-    seen_batch.append(key)
-
-def cleanup_user_hunter_runtime(user_id: int):
-    user_buy_inflight[user_id].clear()
-    task = user_hunter_tasks.get(user_id)
-    if task is asyncio.current_task():
-        user_hunter_tasks.pop(user_id, None)
-    worker = user_notify_workers.get(user_id)
-    if worker is not None and worker.done():
-        user_notify_workers.pop(user_id, None)
-        user_notify_queues.pop(user_id, None)
-
-
-async def hunter_loop_for_user(user_id: int, chat_id: int):
-    await load_user_data(user_id)
-    user_buy_inflight[user_id].clear()
-    ensure_notify_worker(user_id)
-    no_lots_streak = 0
-    cycle_num = 0
-
-    async def fetch_sources(uid: int, *, include_non_autobuy: bool):
-        async for result in iter_sources_results_split(uid, include_non_autobuy=include_non_autobuy):
-            yield result
-
-    async def mark_seen(key: str):
-        user_seen_items[user_id].add(key)
-
-    async def enqueue_autobuy(source: dict, item: dict, found_perf: float):
-        key = make_item_key(item)
-        if key in user_buy_attempted[user_id] or key in user_buy_inflight[user_id]:
-            return False
-        user_buy_inflight[user_id].add(key)
-        try:
-            admitted = await autobuy_queue_manager.enqueue(
-                user_id, (chat_id, source, item, found_perf), _autobuy_queue_handler
-            )
-            if admitted is False:
-                user_buy_inflight[user_id].discard(key)
-            return admitted
-        except Exception:
-            user_buy_inflight[user_id].discard(key)
-            raise
-
-    while user_search_active[user_id]:
-        cycle_num += 1
-        include_non_autobuy = NON_AUTOBUY_CYCLE_EVERY <= 1 or (cycle_num % NON_AUTOBUY_CYCLE_EVERY == 0)
-        seen_batch: list[str] = []
-        new_items_processed = 0
-        try:
-            pipeline = DiscoveryPipeline(
-                fetch_sources=fetch_sources,
-                make_key=make_item_key,
-                is_seen=lambda key: key in user_seen_items[user_id],
-                is_attempted=lambda key: key in user_buy_attempted[user_id] or key in user_buy_inflight[user_id],
-                mark_seen=lambda key, batch=seen_batch: _mark_seen_and_batch(key, user_id, batch),
-                enqueue_autobuy=enqueue_autobuy,
-                decision=DecisionEngine(),
-                max_items_per_source=MAX_ITEMS_PER_SOURCE_SCAN,
-                max_new_items_per_cycle=MAX_NEW_ITEMS_PER_CYCLE,
-            )
-            accepted, stats, errors = await pipeline.run(user_id, include_non_autobuy=include_non_autobuy)
-            for _name, _url, _err in errors:
-                user_api_errors[user_id] += 1
-
-            for entry in accepted:
-                if MAX_NEW_ITEMS_PER_CYCLE > 0 and new_items_processed >= MAX_NEW_ITEMS_PER_CYCLE:
-                    break
-                src_name = entry.source.get("name") or "UNKNOWN"
-                try:
-                    await send_bot_message(
-                        chat_id, make_card(entry.item, src_name),
-                        parse_mode="HTML", disable_web_page_preview=True
-                    )
-                except Exception as e:
-                    log_autobuy(f"LOT_NOTIFY_SEND_ERR user_id={user_id} err='{_safe_compact(str(e),240)}'")
-                new_items_processed += 1
-
-            if new_items_processed == 0:
-                no_lots_streak += 1
-            else:
-                no_lots_streak = 0
-                reset_no_lots_message(user_id)
-
-            if seen_batch:
-                await db_mark_seen_batch(user_id, seen_batch)
-            await asyncio.sleep(await user_hunter_interval(user_id))
-
-        except asyncio.CancelledError:
-            user_hunter_mode[user_id] = "off"
-            break
-        except Exception as e:
-            if seen_batch:
-                try:
-                    await db_mark_seen_batch(user_id, seen_batch)
-                except Exception:
-                    pass
-            user_api_errors[user_id] += 1
-            log_autobuy(f"HUNTER_EXC user_id={user_id} err='{_safe_compact(str(e),400)}'")
-            await asyncio.sleep(max(await user_hunter_interval(user_id), 0.01))
-
-    await autobuy_queue_manager.stop_user(user_id)
-    cleanup_user_hunter_runtime(user_id)
-
-__all__ = [name for name in globals() if not name.startswith("__")]
