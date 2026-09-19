@@ -409,6 +409,8 @@ async def buttons_handler(message: types.Message):
                 user_hunter_tasks.pop(target_uid, None)
                 await autobuy_queue_manager.stop_user(target_uid, drain=False)
                 user_buy_inflight[target_uid].clear()
+                await delete_lzt_token(target_uid)
+                invalidate_balance_cache(target_uid)
                 log_autobuy(f"LICENSE_REVOKE user_id={target_uid} by_admin={user_id}")
 
                 try:
