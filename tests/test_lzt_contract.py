@@ -85,3 +85,14 @@ def test_autobuy_queue_shutdown_drains_pending_state():
         await manager.stop_user(100, drain=False)
 
     asyncio.run(run())
+
+
+def test_category_search_with_order_by_uses_search_rate_bucket():
+    from app.services.market_api import _api_limit_bucket
+
+    bucket, interval = _api_limit_bucket(
+        "GET",
+        "https://api.lzt.market/new-category?order_by=pdate_to_down_upload",
+    )
+    assert bucket == "search-global"
+    assert interval == 3.0
