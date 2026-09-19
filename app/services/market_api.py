@@ -148,8 +148,9 @@ def _retry_after_seconds(headers) -> float | None:
 
 async def fetch_items_raw(url: str, request_timeout: float | None = None, user_id: int | None = None):
     bucket, min_interval = _api_limit_bucket("GET", url)
-    await request_rate_limiter.wait(bucket, min_interval)
-    await adaptive_rate_limiter.before_request(bucket)
+    limiter_bucket = f"user:{user_id}:{bucket}" if user_id is not None else bucket
+    await request_rate_limiter.wait(limiter_bucket, min_interval)
+    await adaptive_rate_limiter.before_request(limiter_bucket)
 
     headers = await _api_headers_for_user(user_id)
     if user_id is not None and "Authorization" not in headers:
@@ -161,7 +162,7 @@ async def fetch_items_raw(url: str, request_timeout: float | None = None, user_i
         started = time.perf_counter()
         async with session.get(url, headers=headers, timeout=timeout_value) as resp:
             elapsed = int((time.perf_counter() - started) * 1000)
-            await adaptive_rate_limiter.observe(bucket, resp.headers)
+            await adaptive_rate_limiter.observe(limiter_bucket, resp.headers)
             METRICS.inc("market_requests_total", labels={"method": "GET", "bucket": bucket, "status": resp.status // 100})
             METRICS.observe("market_request_latency_ms", elapsed, labels={"bucket": bucket})
             body = await resp.text()
@@ -169,7 +170,7 @@ async def fetch_items_raw(url: str, request_timeout: float | None = None, user_i
             if resp.status == 429:
                 retry_after = _retry_after_seconds(resp.headers)
                 if retry_after is not None:
-                    await adaptive_rate_limiter.note_retry_after(bucket, retry_after)
+                    await adaptive_rate_limiter.note_retry_after(limiter_bucket, retry_after)
                 return None, f"HTTP 429: {body[:300]}", resp.status
 
             if resp.status in (400, 401, 403, 404):
