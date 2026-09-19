@@ -93,8 +93,9 @@ WELCOME_STICKERS = [
 ]
 
 DENIED_TEXT = (
-    "⛔️ Доступ к боту закрыт по умолчанию.\n\n"
-    "Нажми кнопку ниже, чтобы отправить запрос владельцу."
+    "⛔️ Доступ к боту закрыт.\n\n"
+    "Если ты приобрёл доступ, введи выданный код.\n"
+    "Если кода нет — можно отправить запрос владельцу."
 )
 
 
@@ -110,7 +111,21 @@ def kb_button(text: str, style: str | None = None) -> KeyboardButton:
 
 def kb_request() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[kb_button("🔓 Запрос на бота", "primary")]],
+        keyboard=[
+            [kb_button("🔑 Ввести код доступа", "success")],
+            [kb_button("🔓 Запрос на бота", "primary")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def kb_license_admin() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [kb_button("➕ Создать код", "success"), kb_button("📊 Статистика кодов")],
+            [kb_button("📋 Последние коды"), kb_button("🚫 Отозвать по ID", "danger")],
+            [kb_button("⬅️ Назад")],
+        ],
         resize_keyboard=True,
     )
 
@@ -123,7 +138,7 @@ def kb_main(user_id: int) -> ReplyKeyboardMarkup:
         [kb_button("ℹ️ Инфо")],
     ]
     if user_id in OWNER_IDS:
-        rows.insert(4, [kb_button("👥 Пользователи", "primary")])
+        rows.insert(4, [kb_button("👥 Пользователи", "primary"), kb_button("🔑 Коды доступа", "success")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
