@@ -7,19 +7,13 @@ from market.rate_limit import AdaptiveRateLimiter
 
 def test_autobuy_strategy_uses_only_documented_fast_buy_routes():
     urls = build_buy_urls("https://api.lzt.market/mihoyo?order_by=pdate_to_down", 123)
-    assert urls == [
-        "https://api.lzt.market/123/fast-buy",
-        "https://prod-api.lzt.market/123/fast-buy",
-    ]
+    assert urls == ["https://api.lzt.market/123/fast-buy"]
     assert all("/buy" not in url.removeprefix("https://").split("/", 1)[-1] for url in urls)
 
 
 def test_autobuy_strategy_never_inherits_an_untrusted_source_host():
     urls = build_buy_urls("https://example.invalid/mihoyo", 123)
-    assert urls == [
-        "https://api.lzt.market/123/fast-buy",
-        "https://prod-api.lzt.market/123/fast-buy",
-    ]
+    assert urls == ["https://api.lzt.market/123/fast-buy"]
 
 
 def test_default_lzt_pacing_matches_documented_base_and_search_limits():
