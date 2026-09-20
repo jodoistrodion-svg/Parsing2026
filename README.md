@@ -61,12 +61,11 @@ Quick start on the phone:
 
     git clone --branch deploy/android-termux --single-branch https://github.com/jodoistrodion-svg/Parsing2026.git
     cd Parsing2026
-    bash android/bootstrap.sh
-    bash android/install-service.sh
+    bash android/proot-bootstrap.sh
 
-Install and open Termux:Boot once, then:
+The single bootstrap command installs Debian through PRoot-Distro, creates the Linux venv, installs runtime and development dependencies, creates/preserves .env, runs compile/tests/lint, installs the supervised service and creates the Termux:Boot hook. The initial AUTOBUY_MODE is always dry-run.
 
-    bash android/install-boot.sh
+Install and open Termux:Boot once from the same source family as Termux. The generated boot hook then starts the supervised service automatically.
 
 Check runtime:
 
