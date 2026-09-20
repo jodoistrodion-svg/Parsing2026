@@ -1,0 +1,3 @@
+# Android deployment uses Debian/glibc inside Termux PRoot-Distro.
+# Keep this in sync with the normal runtime dependencies.
+-r requirements.txt

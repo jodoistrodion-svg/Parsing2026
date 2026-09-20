@@ -22,7 +22,7 @@ from app.runtime.core import (
     kb_main, kb_request, kb_license_admin, kb_lzt_menu, kb_urls_menu, load_user_data, log_autobuy,
     parse_index_from_button, parse_user_id_from_button, safe_delete, sanitize_url_name,
     send_bot_message, send_screen, send_welcome_sticker, show_denied, show_status, _safe_compact,
-    show_urls_list_screen, show_users_screen, user_buy_attempted, user_history_reset_pending,
+    show_urls_list_screen, show_users_screen, user_buy_attempted, user_buy_inflight, user_history_reset_pending,
     user_hunter_mode, user_hunter_tasks, user_last_screen_msg_id, user_modes, user_page_state,
     user_pending_rename_url, user_pending_url, user_search_active, user_seen_items,
     user_url_limit, user_urls, get_all_sources, send_compact_10_for_user,

@@ -14,11 +14,11 @@ from app.config.settings import (
     AUTOBUY_PARALLEL_HTTP, AUTOBUY_QUEUE_RETRY_MAX_DELAY, AUTOBUY_QUEUE_RETRY_MIN_DELAY,
     AUTOBUY_RETRY_ATTEMPTS, AUTOBUY_RETRY_MAX_DELAY, AUTOBUY_RETRY_MIN_DELAY,
     AUTOBUY_TOTAL_RETRY_WINDOW_SEC, AUTOBUY_URL_LIMIT, FAST_AUTOBUY_TIMEOUT,
-    LZT_API_KEY as _LEGACY_LZT_API_KEY, LZT_BALANCE_ID, LZT_SECRET_WORD, MAX_ITEMS_PER_SOURCE_SCAN,
+    LZT_API_KEY as _LEGACY_LZT_API_KEY, LZT_BALANCE_ID, MAX_ITEMS_PER_SOURCE_SCAN,
     MAX_NEW_ITEMS_PER_CYCLE, NON_AUTOBUY_CYCLE_EVERY,
 )
 from app.runtime.core import (
-    bot, _format_value, _safe_compact, autobuy_endpoint_cache, autobuy_queue_manager,
+    bot, _safe_compact, autobuy_endpoint_cache, autobuy_queue_manager,
     buy_semaphore, enqueue_hunter_notification, ensure_notify_worker, get_buy_lock,
     load_user_data, log_autobuy, make_card, make_item_key, reset_no_lots_message,
     send_bot_message, user_api_errors, user_buy_attempted, user_buy_inflight, purchase_idempotency,
@@ -490,7 +490,6 @@ async def try_autobuy_item(source: dict, item: dict, found_perf: float | None = 
 async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item: dict, found_perf: float):
     item_id = item.get("item_id") or item.get("id")
     item_key = make_item_key(item)
-    src_name = source.get("name") or "UNKNOWN"
     bought = False
     buy_info = "autobuy_not_started"
     should_mark_attempt = False
@@ -515,6 +514,11 @@ async def _run_autobuy_and_notify(user_id: int, chat_id: int, source: dict, item
 
     dur_ms = int((time.perf_counter() - found_perf) * 1000)
     log_autobuy(f"BUY_T6_RESULT item_id={item_id} since_found_ms={dur_ms} bought={int(bool(bought))}")
+
+async def _autobuy_queue_handler(user_id: int, payload: tuple[int, dict, dict, float]) -> None:
+    chat_id, source, item, found_perf = payload
+    await _run_autobuy_and_notify(user_id, chat_id, source, item, found_perf)
+
 
 async def _mark_seen_and_batch(key: str, user_id: int, seen_batch: list[str]):
     user_seen_items[user_id].add(key)
@@ -573,7 +577,7 @@ async def hunter_loop_for_user(user_id: int, chat_id: int):
                 make_key=make_item_key,
                 is_seen=lambda key: key in user_seen_items[user_id],
                 is_attempted=lambda key: key in user_buy_attempted[user_id] or key in user_buy_inflight[user_id],
-                mark_seen=lambda key: _mark_seen_and_batch(key, user_id, seen_batch),
+                mark_seen=lambda key, batch=seen_batch: _mark_seen_and_batch(key, user_id, batch),
                 enqueue_autobuy=enqueue_autobuy,
                 decision=DecisionEngine(),
                 max_items_per_source=MAX_ITEMS_PER_SOURCE_SCAN,
