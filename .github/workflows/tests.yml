@@ -2,7 +2,7 @@ name: production-quality
 
 on:
   push:
-    branches: ["main", "refactor/**", "fix/**"]
+    branches: ["main", "refactor/**", "fix/**", "deploy/**"]
   pull_request:
     branches: ["main"]
 
