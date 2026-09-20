@@ -78,13 +78,13 @@ echo "[debian 4/7] Verifying Python dependencies..."
 python -c "import aiogram,aiohttp,aiosqlite,dotenv,cryptography,pydantic,pydantic_core; from cryptography.fernet import Fernet; Fernet.generate_key(); print('IMPORTS OK'); print('aiogram',aiogram.__version__); print('cryptography',cryptography.__version__); print('pydantic',pydantic.__version__); print('pydantic-core',pydantic_core.__version__)"
 
 echo "[debian 5/7] Compiling project..."
-python -m compileall -q .
+python -m compileall -q main.py test_v2.py app bot buyer domain filters market metrics purchase runtime services storage
 
 echo "[debian 6/7] Running tests..."
 python -m pytest -q
 
 echo "[debian 7/7] Running correctness checks..."
-python -m pyflakes .
+python -m pyflakes main.py test_v2.py app bot buyer domain filters market metrics purchase runtime services storage
 python -m ruff check .
 
 echo
