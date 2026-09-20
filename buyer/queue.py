@@ -75,13 +75,13 @@ class UserAutobuyQueueManager:
             try:
                 queue.put_nowait(payload)
             except asyncio.QueueFull:
-            METRICS.inc("autobuy_queue_rejected_total")
-            logger.warning(
+                METRICS.inc("autobuy_queue_rejected_total")
+                logger.warning(
                 "AUTOBUY_QUEUE_FULL user_id=%s maxsize=%s",
                 user_id,
                 self._maxsize,
-            )
-            return False
+                )
+                return False
 
         METRICS.inc("autobuy_queue_admitted_total")
         return True
