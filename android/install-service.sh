@@ -23,7 +23,7 @@ EOF
 cat > "$SERVICE_DIR/log/run" <<EOF
 #!/data/data/com.termux/files/usr/bin/sh
 set -eu
-exec "$PREFIX/bin/svlogger"
+exec "$PREFIX/share/termux-services/svlogger" "$@"
 EOF
 
 chmod 700 "$SERVICE_DIR/run" "$SERVICE_DIR/log/run"
