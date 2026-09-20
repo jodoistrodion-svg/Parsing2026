@@ -23,7 +23,7 @@ pkg update -y
 pkg upgrade -y
 
 echo "[2/6] Installing native runtime/build packages..."
-pkg install -y git python python-pip python-cryptography clang make pkg-config openssl ca-certificates libffi termux-services
+pkg install -y git python python-pip python-cryptography clang make pkg-config openssl ca-certificates libffi curl termux-services
 
 if [ ! -d "$VENV" ]; then
   echo "[3/6] Creating Python venv with Termux system packages visible..."
