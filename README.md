@@ -53,6 +53,27 @@ Run:
 
     .\.venv\Scripts\python.exe main.py
 
+## Android / Termux
+
+A dedicated Android deployment branch is available at `deploy/android-termux`. It targets the realme C35/Android 13 setup and adds Termux bootstrap, runit supervision, boot startup, backups and Android-specific dependency handling without rewriting the application core.
+
+Quick start on the phone:
+
+    git clone --branch deploy/android-termux --single-branch https://github.com/jodoistrodion-svg/Parsing2026.git
+    cd Parsing2026
+    bash android/bootstrap.sh
+    bash android/install-service.sh
+
+Install and open Termux:Boot once, then:
+
+    bash android/install-boot.sh
+
+Check runtime:
+
+    bash android/status.sh
+
+The Android deployment starts with `AUTOBUY_MODE=dry-run`.
+
 ## Configuration
 
 Preferred variables:
