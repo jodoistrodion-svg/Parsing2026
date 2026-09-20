@@ -23,10 +23,12 @@ pkg update -y
 pkg upgrade -y
 
 echo "[2/6] Installing native runtime/build packages..."
-pkg install -y git python python-pip python-cryptography clang make pkg-config openssl ca-certificates libffi curl termux-services
+pkg install -y git python python-pip python-cryptography python-pydantic-core clang make pkg-config openssl ca-certificates libffi curl termux-services
 
 if [ ! -d "$VENV" ]; then
   echo "[3/6] Creating Python venv with Termux system packages visible..."
+# pydantic-core is a Rust extension and must come from the Android-native Termux package.
+# pip cannot build its generic Linux wheel for aarch64-unknown-linux-android.
   python -m venv --system-site-packages "$VENV"
 else
   echo "[3/6] Reusing existing venv: $VENV"
@@ -83,7 +85,7 @@ chmod 700 "$DATA_DIR"
 echo "[6/6] Running Android runtime preflight..."
 "$PYTHON" - <<'PY'
 import importlib
-mods = ["aiogram", "aiohttp", "aiosqlite", "dotenv", "cryptography"]
+mods = ["aiogram", "aiohttp", "aiosqlite", "dotenv", "cryptography", "pydantic", "pydantic_core"]
 for name in mods:
     module = importlib.import_module(name)
     print(f"OK {name} {getattr(module, '__version__', '')}".rstrip())
