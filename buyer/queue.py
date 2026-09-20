@@ -77,9 +77,9 @@ class UserAutobuyQueueManager:
             except asyncio.QueueFull:
                 METRICS.inc("autobuy_queue_rejected_total")
                 logger.warning(
-                "AUTOBUY_QUEUE_FULL user_id=%s maxsize=%s",
-                user_id,
-                self._maxsize,
+                    "AUTOBUY_QUEUE_FULL user_id=%s maxsize=%s",
+                    user_id,
+                    self._maxsize,
                 )
                 return False
 
