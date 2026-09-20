@@ -13,32 +13,36 @@ The bot is lightweight enough for this class of device. The important constraint
     Android 13
         |
         +-- Termux
-        |     +-- Python + venv (--system-site-packages)
-        |     +-- Parsing2026
-        |     +-- SQLite in $HOME/.local/share/parsing2026
-        |     +-- termux-services / runit
+        |     +-- proot-distro
+        |           +-- Debian / glibc
+        |                 +-- Python venv
+        |                 +-- Parsing2026
+        |                 +-- SQLite in /root/.local/share/parsing2026
+        |     +-- termux-services / runit (host-side supervisor)
         |     +-- Termux:Boot
         |
         +-- Telegram API
         +-- LZT API
 
-termux-services supervises the Python process and restarts it if it exits. Termux:Boot starts the enabled service supervisor after Android boot. A Termux wake lock is acquired at boot because the bot is intended to run continuously.
+Termux services supervises the PRoot/Debian Python process and restarts the whole PRoot session if it exits. Termux:Boot starts the host-side service supervisor after Android boot. A Termux wake lock is acquired at boot because the bot is intended to run continuously.
 
-## Why Android has a separate requirements file
+## Why Android uses Debian inside Termux
 
-Termux provides a native python-cryptography package. Android requirements therefore install the runtime dependencies through pip and deliberately do not reinstall cryptography from PyPI. This avoids forcing a Rust build on the phone.
+The Android/Bionic Python environment is not treated as the production runtime because Rust-backed native wheels such as pydantic-core and cryptography are not reliably interchangeable with normal Linux wheels. The bot therefore runs in Debian/glibc under PRoot-Distro. Termux remains only the host/supervisor layer.
 
 ## First installation
 
-Install Termux from one source and keep all Termux add-ons on the same source/signing family. The official Termux project documents F-Droid and GitHub releases; Termux:Boot must use a compatible signing source.
+Install Termux from one source and keep all Termux add-ons on the same source/signing family. The official Termux project documents compatible releases; Termux:Boot must use the same signing family.
 
-Then in Termux, from the cloned repository:
+Then, from the cloned repository, run only:
 
-    bash android/bootstrap.sh
+    bash android/proot-bootstrap.sh
+
+That one script installs the Debian container, Python runtime, all dependencies, .env, tests, lint, the supervised service and the boot hook. It leaves AUTOBUY_MODE=dry-run.
+
+If you want to rerun individual deployment steps later:
+
     bash android/install-service.sh
-
-Install and open Termux:Boot once, then run:
-
     bash android/install-boot.sh
 
 Check:
