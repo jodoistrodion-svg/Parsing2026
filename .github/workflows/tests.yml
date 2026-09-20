@@ -41,6 +41,23 @@ jobs:
       - name: Ruff
         run: python -m ruff check .
 
+  android-deployment:
+    name: android deployment scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n android/bootstrap.sh
+          bash -n android/install-service.sh
+          bash -n android/install-boot.sh
+          bash -n android/status.sh
+          bash -n android/start.sh
+          bash -n android/stop.sh
+          bash -n android/backup.sh
+
   dependency-audit:
     name: dependency audit
     runs-on: ubuntu-latest
